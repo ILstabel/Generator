@@ -1203,8 +1203,12 @@ SIDEBAR_STYLE = """
 [data-testid="stSidebar"] input { background-color: #FFFFFF; }
 [data-testid="stTextArea"]:has(textarea[aria-label="Saved report"]) [data-baseweb="textarea"],
 [data-testid="stTextArea"]:has(textarea[aria-label="Saved report"]) [data-baseweb="base-input"],
-textarea[aria-label="Saved report"] { background-color: #F7FBF9 !important; }
-textarea[aria-label="Saved report"] { color: #1F2933 !important; -webkit-text-fill-color: #1F2933 !important; }
+[data-testid="stTextArea"]:has(textarea[aria-label="Generated report"]) [data-baseweb="textarea"],
+[data-testid="stTextArea"]:has(textarea[aria-label="Generated report"]) [data-baseweb="base-input"],
+textarea[aria-label="Saved report"],
+textarea[aria-label="Generated report"] { background-color: #F3F4F6 !important; }
+textarea[aria-label="Saved report"],
+textarea[aria-label="Generated report"] { color: #1F2933 !important; -webkit-text-fill-color: #1F2933 !important; }
 </style>
 """
 

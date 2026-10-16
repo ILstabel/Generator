@@ -2,6 +2,10 @@
 
 ## Quick start (first time)
 
+> **No Python?** Windows users can run the portable version instead: unzip
+> `Generator-portable.zip` and double-click `Start Generator.bat`. See
+> [Sharing with someone who has no Python](#sharing-with-someone-who-has-no-python-portable-windows-version).
+
 1. Install [Python 3.10 or later](https://www.python.org/downloads/) (tick
    **Add Python to PATH** during installation) and
    [Git](https://git-scm.com/downloads), or use **Code > Download ZIP** on
@@ -63,6 +67,41 @@ The app has three tabs: **Assessment** (forms, scores and reports),
 **Insights** (charts of the clinic's saved assessments and patient trends) and **About** (a plain-language summary of
 what the app does, how risk points are calculated, and the questionnaire
 scoring rules with references).
+
+## Sharing with someone who has no Python (portable Windows version)
+
+The `portable` folder builds a self-contained Windows 64-bit copy that includes
+its own Python, so the recipient installs nothing.
+
+**Build it** (on a Windows computer with internet and Python 3.12, the same
+minor version as the bundled Python): double-click `portable\Build portable.bat`,
+or run
+
+```powershell
+$env:GENERATOR_BUILD_PYTHON = "C:\path\to\python3.12\python.exe"   # if `python` is another version
+powershell -ExecutionPolicy Bypass -File portable\build_portable.ps1   # add -NoZip to skip zipping
+```
+
+This downloads the python.org embeddable Python 3.12.7, installs the pinned
+`requirements.txt` packages into it, copies the app, the Git-tracked sample
+forms and the synthetic **TEST01–TEST08** patients (created fresh by
+`make_test_records.py`), checks the imports and writes
+`dist\Generator-portable.zip`. Local patient forms and saved results are never
+copied. `dist` is Git-ignored.
+
+**Send the zip** (it is too large for most e-mail; use OneDrive, Google Drive or
+a USB stick). The recipient:
+
+1. Extracts the zip to a writable folder (for example Documents).
+2. Double-clicks `Generator\Start Generator.bat`. The browser opens
+   `http://localhost:8765` (localhost only, not visible on the network).
+3. Closes the black window to stop the app.
+
+Windows SmartScreen may ask once: **More info > Run anyway**. Forms go in
+`Generator\app\patient_forms` and results are saved in
+`Generator\app\patient_results`. `READ ME FIRST.txt` in the zip repeats these
+steps. To remove the TEST patients, delete the `TEST*` files in
+`patient_results`.
 
 ## Sharing a public demo (Streamlit Community Cloud)
 
@@ -154,6 +193,7 @@ Each patient code has **one** saved record, directly in `patient_results`:
 patient_results\
   10001_score.txt    readable generator report (same layout as the original HTML template)
   10001_score.json   visit folder, scores, item responses, summary rows, flags, risk, repeat interval, status
+  10001_history.json totals of every saved visit (one entry per visit folder), used for patient trends
 ```
 
 Every save overwrites the patient's previous record, whatever its visit date
@@ -170,8 +210,15 @@ Automatic and response-reviewed records have UDS/PDMP, refill behavior and
 clinical context marked as not documented. Only the final report includes
 those clinician entries.
 
+**Visits:** when a patient has forms in several date folders, a **Visit**
+selector under *Individual Total Scores* defaults to the latest visit and drives
+the score details and the pre-filled assessment scores.
+
 **Saved patient records:** choose a patient code to see the saved visit
-folder, status, risk and score summary, and to view or download the report.
+folder, status, risk and score summary, and to view or download the report. The
+code follows the patient selected under *Individual Total Scores*, so the saved
+report matches the scores on screen; if an older visit is selected, a note says
+the saved record is the latest visit.
 
 `patient_results` is Git-ignored. Saved records contain patient health
 information; protect this folder with appropriate access controls and backups.
@@ -244,18 +291,26 @@ labeled text, not a general document-extraction system.
 
 ## Insights tab
 
-The **Insights** tab reads the research dataset
-`Data\Dataset_14-day_AA_depression_symptoms_mood_and_PHQ-9.csv` (185 study
-participants, not practice patients). Each participant's PHQ-9 is scored with the
-app's own rules, so severity bands and incomplete-form handling match the
-assessment report. Filters for sex, age group and severity start empty, which
-means **All**; pick one or more values to narrow the population. **Compare populations by** groups every chart by severity, sex, age group or
-PHQ-9 item #9 response. Charts show severity mix, PHQ-9 distribution, item #9
-positive rate, average symptom profile, daily mood trend, mood by time of day and
-PHQ-9 versus mean mood. Groups with fewer than 5 participants (and missing values)
-are merged into "Other / not reported", and mood-trend points from fewer than 5
-participants are hidden, to reduce re-identification risk. If the CSV is absent
-the tab shows a message and the assessment workflow is unaffected.
+The **Insights** tab summarises the saved records in `patient_results`: one
+row per patient code, using the latest saved visit and the overall risk as
+saved. Nothing leaves the computer.
+
+- **Filters** for visit date, record status and overall risk (empty = **All**).
+  Small selections and mixed risk-threshold presets are flagged.
+- **Headline numbers** (patients, high risk, item 9 positive, insufficient
+  information, final reports) and a **follow-up list**, most urgent first:
+  item 9 positive, missing answers, unverified drafts, overdue repeat battery.
+- **Charts:** score heatmap (outlined cells meet a clinical flag), overall-risk
+  donut, PHQ-9 severity bars, clinical-flag lollipops, PEG vs PDI scatter,
+  assessments per visit date, and a score distribution for a chosen measure.
+- **All saved assessments** table with CSV download.
+- **Patient trend** for a chosen patient (also shown in the Assessment tab):
+  score lines with flag thresholds, overall risk per visit and change since the
+  first visit for PEG and PDI, read from `<code>_history.json`.
+
+`make_test_records.py` creates synthetic patients **TEST01–TEST08** (one to four
+visits each, reports marked *SYNTHETIC TEST DATA*) so the tab can be tried
+without real data; `python make_test_records.py --remove` deletes them.
 
 ## Questionnaire scoring rules
 
@@ -541,5 +596,5 @@ Synthetic scan tests cover date-folder discovery, multiple PDFs, checkbox/circle
 detection, blank and double marks, unsupported PDFs, mandatory response review,
 source mapping, overwriting per-patient records and importing one reviewed form
 without merging other patients. Report tests check every original-template
-section. Insights tests cover PHQ-9 scoring of the research data, small-group
-merging, filters and every grouping.
+section. Insights tests cover loading saved records, filters, the follow-up list,
+heatmap data, patient trends and the tab layout.

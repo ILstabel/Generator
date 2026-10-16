@@ -1,0 +1,35 @@
+Chronic Pain / Opioid Risk Generator - portable Windows version
+================================================================
+
+No installation is needed. Python is included in the "python" folder.
+
+START
+  1. Unzip the whole "Generator" folder somewhere you can write to,
+     for example Documents or Desktop (not Program Files).
+  2. Double-click "Start Generator.bat".
+  3. Your browser opens at http://localhost:8765 after a few seconds.
+     If it does not, open that address yourself.
+  Keep the black window open while you use the app.
+
+STOP
+  Close the black window.
+
+IF WINDOWS BLOCKS IT
+  "Windows protected your PC": click "More info", then "Run anyway".
+  A firewall prompt may appear: the app only needs access on this computer,
+  so you can choose Cancel / private networks only.
+
+YOUR FILES (inside the "app" folder)
+  patient_forms\YYYY_MM_DD\<code>.pdf   scanned forms to score
+  patient_results\                      saved scores and reports
+  The included forms 10001-10003 are made-up test forms, and patients
+  TEST01-TEST08 are made-up saved records so the Insights tab has data.
+  Delete the TEST* files in patient_results when you no longer need them.
+  Everything stays on this computer; nothing is uploaded.
+  To keep results when you get a newer version, copy patient_results
+  into the new app folder.
+
+HELP
+  app\USER_MANUAL.md has step-by-step instructions.
+
+This is a support tool only. A qualified clinician must verify all results.

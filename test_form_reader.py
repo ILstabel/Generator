@@ -249,8 +249,14 @@ class BatchMappingTests(unittest.TestCase):
             self.assertTrue(any("Calculated result" in frame.value.columns for frame in app.dataframe))
             self.assertIn("Patient trend: same (saved visits)", [e.label for e in app.expander])
             self.assertTrue(any("Patient same:" in text.value for text in app.markdown))
+            self.assertEqual(app.selectbox(key="records_code").value, "same")
             app.selectbox(key="forms_inspect_code").select("other").run()
             self.assertTrue(any("Patient other:" in text.value for text in app.markdown))
+            # The saved record shown must be the patient selected for scores, not the first saved code.
+            self.assertEqual(app.selectbox(key="records_code").value, "other")
+            self.assertTrue(app.text_area(key="records_report_other").value)
+            app.selectbox(key="records_code").select("same").run()
+            self.assertEqual(app.selectbox(key="records_code").value, "same")
             headings = lambda: [header.value for header in app.subheader]
             self.assertIn("All Assessments Scores", headings())
             self.assertIn("Individual Total Scores", headings())
@@ -262,6 +268,16 @@ class BatchMappingTests(unittest.TestCase):
             self.assertIn("Individual Total Scores", headings())
             self.assertFalse(app.sidebar.toggle(key="forms_manual_inspection").value)
             self.assertFalse(any(e.label.startswith("Patient ") and not e.label.startswith("Patient trend") for e in app.expander))
+            # Two visits: the summary, paste box and saved record default to the latest visit.
+            self.assertEqual(app.selectbox(key="forms_visit_same").value, "2026_10_15")
+            patient_lines = [text.value for text in app.markdown if text.value.startswith("**Patient same:")]
+            self.assertEqual(patient_lines, ["**Patient same: 2026_10_15 / same.pdf**"])
+            self.assertIn("visit 2026_10_15", app.text_area(key="assessment_text").value)
+            self.assertFalse(any("the scores above are for visit" in box.value for box in app.info))
+            app.selectbox(key="forms_visit_same").select("2026_10_14").run()
+            self.assertIn("visit 2026_10_14", app.text_area(key="assessment_text").value)
+            self.assertTrue(any("latest visit (2026_10_15); the scores above are for visit 2026_10_14" in box.value for box in app.info))
+            app.selectbox(key="forms_visit_same").select("2026_10_15").run()
             app.sidebar.toggle(key="forms_manual_inspection").set_value(True).run()
             self.assertIn("Individual Manual Inspection", headings())
             loaded = app.session_state["forms_result_inspections"]

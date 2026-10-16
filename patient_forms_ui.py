@@ -274,15 +274,33 @@ def review_patient_forms(
         help="Shows every selected-date form for this patient code."
         + (" Review, correct and save each one." if manual else " Visual inspection is available in Individual Assessments mode."),
     )
+    # Newest visit first, so the latest visit is the default everywhere below.
+    patient_forms = sorted(
+        (form for form in inspections if inspection_label(form) == selected_label),
+        key=lambda form: form.folder, reverse=True,
+    )
+    visits = list(dict.fromkeys(form.folder for form in patient_forms))
+    visit = visits[0]
+    if len(visits) > 1 and not manual:
+        visit_key = f"forms_visit_{selected_label}"
+        if st.session_state.get(visit_key) not in visits:
+            st.session_state[visit_key] = visits[0]
+        visit = st.selectbox(
+            "Visit", visits, key=visit_key,
+            format_func=lambda folder: f"{folder} (latest)" if folder == visits[0] else folder,
+            help="Defaults to the latest visit, which is the one saved as the patient's score record.",
+        )
     if autofill:
-        # The newest visit for the selected patient fills the paste-scores box; refreshed when the patient or a corrected response changes.
-        form = next(form for form in inspections if inspection_label(form) == selected_label)
+        # The chosen visit (latest by default) fills the paste-scores box; refreshed when the patient, visit or a corrected response changes.
+        form = next(form for form in patient_forms if form.folder == visit)
         values = current_values(form)
         marker = (form_key(form), repr(sorted(values.items())))
         if st.session_state.get("forms_autofill_source") != marker:
             autofill(form, values)
             st.session_state["forms_autofill_source"] = marker
-    trend_code = patient_code(next(form for form in inspections if inspection_label(form) == selected_label).filename)
+    trend_code = patient_code(patient_forms[0].filename)
+    st.session_state["records_follow_code"] = trend_code
+    st.session_state["records_follow_visit"] = visit
     if trend_code:
         from patient_trend import patient_trend_view
 
@@ -290,8 +308,8 @@ def review_patient_forms(
             patient_trend_view(trend_code, key="forms_trend")
     if not manual:
         keep_review_state()
-        for form in inspections:
-            if inspection_label(form) != selected_label:
+        for form in patient_forms:
+            if form.folder != visit:
                 continue
             values = current_values(form)
             st.markdown(f"**Patient {patient_code(form.filename) or 'code missing'}: {form.folder} / {form.filename}**")
@@ -302,9 +320,7 @@ def review_patient_forms(
             elif item9 is None:
                 st.warning("PHQ-9 item 9 unresolved; do not infer a negative safety response.")
         return
-    for form in inspections:
-        if inspection_label(form) != selected_label:
-            continue
+    for form in patient_forms:
         token = form_key(form)
         with st.expander(f"Patient {patient_code(form.filename) or 'code missing'}: {form.folder} / {form.filename}", expanded=True):
             st.caption("Source: local PDF. Separate assessment; no patient records or dates are merged.")
@@ -394,6 +410,11 @@ def saved_records_view() -> None:
         if not codes:
             st.caption("No saved records yet. Inspecting forms named with a patient code (for example 10001.pdf) saves them automatically.")
             return
+        follow = st.session_state.get("records_follow_code")
+        # Show the patient selected in the score view, but only when that selection changes so manual browsing still works.
+        if follow in codes and st.session_state.get("records_followed") != follow:
+            st.session_state["records_code"] = follow
+            st.session_state["records_followed"] = follow
         code = st.selectbox("Patient code", codes, key="records_code")
         try:
             history = patient_history(code)
@@ -411,6 +432,9 @@ def saved_records_view() -> None:
         ]))
         if record["status"] != "final_report":
             st.warning(f"{record['status_label']}. Not a final clinical document.")
+        viewing = st.session_state.get("records_follow_visit")
+        if code == follow and viewing and viewing != visit:
+            st.info(f"This saved record is the latest visit ({visit}); the scores above are for visit {viewing}.")
         show_full_table(pd.DataFrame(record["score_summary"]))
         report_path = record_dir(code) / Path(record.get("report_file", f"{code}_score.txt")).name
         try:

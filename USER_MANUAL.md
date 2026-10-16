@@ -69,15 +69,17 @@ The app:
    billing codes and a time attestation. Each patient's latest result is saved
    in the `patient_results` folder.
 
-The app also has an **Insights** tab with charts from a public research study,
-and an **About** tab that explains how it works.
+The app also has an **Insights** tab with charts and trends from your saved
+assessments, and an **About** tab that explains how it works.
 
 ---
 
 ## 2. What you need
 
 - A Windows 10/11 or macOS computer. Linux also works.
-- **Python 3.10 or later**. Anaconda is fine.
+- **Python 3.10 or later**, unless you use the **portable Windows version**
+  ([3.0](#30-no-python-the-portable-windows-version)), which includes Python.
+  Anaconda is fine.
 - **Git** (optional). You can download the app as a ZIP file instead.
 - About 500 MB of free disk space for Python packages.
 - A modern web browser: Chrome, Edge, Firefox or Safari.
@@ -90,6 +92,33 @@ installed. You only need one for the installation step.
 ---
 
 ## 3. Installing the app (first time only)
+
+### 3.0 No Python? The portable Windows version
+
+If you received **Generator-portable.zip**, you do not need to install
+anything:
+
+1. Right-click the zip, choose **Extract All**, and extract it to a folder you
+   can write to, such as **Documents** or **Desktop** (not Program Files).
+2. Open the extracted **Generator** folder and double-click
+   **Start Generator.bat**.
+3. A black window opens and, after a few seconds, your browser opens at
+   **http://localhost:8765**. Keep the black window open while you use the app;
+   close it to stop the app.
+
+If Windows shows *Windows protected your PC*, click **More info**, then **Run
+anyway**. Your forms go in `Generator\app\patient_forms` and results are
+saved in `Generator\app\patient_results`. To upgrade, extract the new zip and
+copy your `patient_forms` and `patient_results` folders into its `app` folder.
+Skip to [section 5](#5-a-tour-of-the-screen).
+
+**Making the portable zip (for whoever shares the app):** on a Windows
+computer with internet and Python 3.12, double-click
+`portable\Build portable.bat` (set `GENERATOR_BUILD_PYTHON` to the Python 3.12
+executable if `python` is a different version). It creates
+`dist\Generator-portable.zip`, containing Python, the app, the sample forms and
+the TEST01–TEST08 test patients. Your own patient forms and saved results are
+never included.
 
 ### 3.1 Install Python
 
@@ -237,8 +266,8 @@ If you installed from a ZIP, download the new ZIP and copy your
   with the **«** arrow at its top and bring it back with **»**.
 - **Assessment tab:** everything to do with scoring patients and writing
   reports.
-- **Insights tab:** charts from a research dataset. These are not your
-  patients.
+- **Insights tab:** charts, a follow-up list and patient trends built from
+  your saved assessments.
 - **About tab:** a plain-language summary, the point rules and the
   questionnaire references.
 - **Menu (⋮, top right):** Streamlit's own menu. **Rerun** refreshes the page,
@@ -387,6 +416,12 @@ final report.
 The results table is titled **Individual Assessment Scores** and has the same
 columns as in [7.1](#71-reading-the-all-assessments-scores-table), with one row
 per visit. Only the **newest** visit is saved as the patient's score record.
+
+When a patient has more than one visit, a **Visit** box appears under
+**Individual Total Scores**. It starts on the latest visit, marked
+*(latest)*, and controls the score details and the scores pre-filled into the
+assessment form. Choose an older visit to look at it; the **Saved patient
+records** box then notes that the saved record is the latest visit.
 
 If you change the patient, folder or mode, the old results disappear. Select
 **Calculate and save scores** again to refresh them.
@@ -652,7 +687,9 @@ Each patient has **one** saved record, which always holds the latest result.
 Two files are saved in the `patient_results` folder:
 
 - `10001_score.txt` — the readable report or score summary;
-- `10001_score.json` — the same data in a structured form for other programs.
+- `10001_score.json` — the same data in a structured form for other programs;
+- `10001_history.json` — the totals of every saved visit, used for the patient
+  trend.
 
 Each new save **replaces** the previous one for that patient, including over a
 final report. Keep downloaded reports or your medical record as the permanent
@@ -669,7 +706,9 @@ copy.
 ### 14.3 Viewing saved records
 
 1. Open **Saved patient records (N patient codes)** in the Assessment tab.
-2. Choose a **Patient code**.
+2. Choose a **Patient code**. It follows the patient you selected under
+   **Individual Total Scores**, so the saved report matches the scores you are
+   looking at; you can still choose any other code.
 3. You will see:
    - the visit folder, status, save time (in UTC), integrated risk and source
      PDF;
@@ -684,43 +723,70 @@ copy.
 
 ## 15. The Insights tab
 
-The Insights tab explores a **public research dataset**: a 14-day study of
-depression symptoms and mood, in the `Data` folder. **It does not contain your
-clinic's patients** and does not affect any score, risk level or report.
+The Insights tab summarises **your clinic's saved assessments** from the
+`patient_results` folder: one row per patient code, using that patient's
+latest saved visit. Overall risk is shown as it was saved. Nothing leaves your
+computer. If no records are saved yet, the tab says so; use **Calculate and
+save scores** in the Assessment tab first.
+
+The made-up patients **TEST01**–**TEST08** let you try the tab before real
+records exist (see [15.5](#155-test-patients)).
 
 ### 15.1 Filters
 
-Open **Filter populations**:
+Open **Filter saved assessments**. **Visit date**, **Record status** and
+**Overall risk** show **All** by default. Click a box to choose one or more
+values; remove them all to go back to **All**. With only a few patients
+selected, a note warns that percentages will change a lot as more records are
+saved. If records were saved with different risk-threshold presets, a warning
+says their risk levels are not directly comparable.
 
-- **Sex**, **Age group** and **Depression severity** show **All** by default.
-  Click a box to choose one or more groups. Remove a choice with its **×**, or
-  remove all choices to go back to **All**.
-- **Compare populations by** chooses how the charts are split: **Depression
-  severity**, **Sex**, **Age group** or **PHQ-9 item #9**.
+### 15.2 Headline numbers and follow-up list
 
-To protect privacy, groups with fewer than 5 participants are combined into
-**Other / not reported**.
+**Patients**, **High risk**, **Item 9 positive**, **Insufficient information**
+and **Final reports** count the selected patients.
 
-### 15.2 Headline numbers
-
-**Participants**, **Mood check-ins**, **Median PHQ-9**, **Moderate or worse**
-(the share of people with PHQ-9 of 10 or more) and **Item #9 positive** (the
-share who answered question 9 above 0).
+The **Follow-up list** shows the patients who need action, most urgent first:
+a positive PHQ-9 question 9, missing answers, unverified automatic drafts, and
+a repeat questionnaire that is overdue (12, 6 or 3 months after the last visit,
+depending on risk).
 
 ### 15.3 Charts
 
 | Chart | How to read it |
 |---|---|
-| **Depression severity mix by population** | Each bar is one group, split into severity bands. It shows which groups have more severe symptoms. |
-| **PHQ-9 total distribution** | Box plot: the box is the middle half of scores, the line is the median and the whiskers show the lowest and highest values. |
-| **PHQ-9 item #9 (self-harm thoughts) positive rate** | The share of each group answering question 9 above 0. |
-| **Symptom profile: mean item score (0-3)** | Heat map. Darker red means that symptom is more common in that group. |
-| **Mood trend over the study** | Average mood (0–4) per study day. Use **Study days shown** to change the number of days. Days with fewer than 5 people in a group are hidden. |
-| **Mood by time of day** | Average mood in the morning, midday and evening. |
-| **PHQ-9 total vs average mood** | One dot per participant. Higher PHQ-9 usually goes with lower mood. |
+| **Score heatmap** | One row per patient (highest risk first), one column per measure. Darker colour = higher score for that scale; the number is the raw score. Outlined cells meet a clinical flag (PHQ-9 ≥ 15, item 9 > 0, PEG ≥ 7, PDI ≥ 41, ORT-OUD ≥ 3, COMM ≥ 9). Grey = not scored. |
+| **Overall risk** | Donut: how many patients are Low, Moderate, High or Insufficient information. |
+| **PHQ-9 depression severity** | Bars: patients in each PHQ-9 severity band. |
+| **Clinical flags** | Lollipops: the share of patients with each flag, among patients with that measure scored. |
+| **Pain interference vs disability** | One dot per patient: PEG average against PDI total, coloured by risk. |
+| **Saved assessments by visit date** | Stacked bars: patients per visit date, split by risk. |
+| **Score distribution** | Pick a measure to see every patient's score as a tick, coloured by risk. |
 
-Hover over any bar, box or dot to see exact numbers. Charts have a **⋯** menu
-to save them as an image.
+Hover over any chart for exact numbers. Charts have a **⋯** menu to save them
+as an image. **All saved assessments** lists the rows behind the charts and can
+be downloaded as a CSV file.
+
+### 15.4 Patient trend
+
+Choose a patient under **Patient trend** to see their saved visits over time:
+score lines with the flag threshold marked, overall risk per visit, and
+**Change since first visit** for PEG and PDI (with the improvement criteria).
+The same view appears in the Assessment tab as **Patient trend: <code> (saved
+visits)** when you select a patient. Trends use each visit's totals as they
+were saved, from the patient's `<code>_history.json` file.
+
+### 15.5 Test patients
+
+`make_test_records.py` creates eight made-up patients, **TEST01**–**TEST08**,
+with one to four visits each (improving, worsening, overdue, item 9 positive,
+blank answers, and so on). Their reports say *SYNTHETIC TEST DATA*. The
+portable version already includes them. To create or remove them yourself:
+
+```powershell
+python make_test_records.py           # create TEST01-TEST08
+python make_test_records.py --remove  # delete every TEST* record
+```
 
 ---
 
@@ -923,7 +989,10 @@ restarting the app returns to the original template.
 | **Save final report** button is missing | The scores were pasted or typed, not loaded from a scanned form with a patient code. |
 | Report disappeared after a change | Expected. Select **Generate reviewed report** again. |
 | Colours or layout look old after an update | Restart the app (Ctrl + C, then start again) and refresh the browser. If colours still look wrong, open **⋮ → Settings** and choose the custom theme. |
-| Insights tab says to add the dataset | The `Data` folder or its CSV file is missing. Download the app again, or copy the `Data` folder back. |
+| Insights tab says "No saved patient records yet" | Save at least one assessment with **Calculate and save scores**, or create the test patients with `python make_test_records.py`. |
+| Portable version: *Windows protected your PC* | Click **More info**, then **Run anyway**. This appears because the .bat file is not signed. |
+| Portable version: the browser does not open | Wait a few seconds and open **http://localhost:8765** yourself. If the black window closed straight away, make sure the zip was fully extracted (not opened inside the zip) to a folder you can write to. |
+| Portable version: firewall prompt | The app only listens on this computer (localhost), so you can click **Cancel**. |
 | An error box with red text (a "Traceback") | Copy the text and restart the app. If it happens again, send the text, **without any patient information**, to the person who maintains the app. |
 
 ---
