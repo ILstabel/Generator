@@ -1,0 +1,150 @@
+{
+  "version": "html-original",
+  "source": "Generator New.html",
+  "description": "Scoring parameters extracted verbatim from the original HTML generator's JavaScript. Kept separate from scoring_config.json for comparison and audit; the Python app does not read this file. Band boundaries reproduce the HTML comparisons exactly: 'min'/'max' are inclusive, 'min_exclusive'/'max_exclusive' are exclusive. Values are not range-checked or prorated by the HTML.",
+  "instruments": {
+    "PEG": {
+      "range": [0, 10],
+      "metric": "Mean of the first 3 numbers on the 'PEG:' line, or a pasted 'PEG ... x / 10' average; not rounded (displayed to 2 decimals)",
+      "bands": [
+        {"min": 0, "max_exclusive": 4, "label": "Low pain interference"},
+        {"min": 4, "max": 6, "label": "Moderate pain interference"},
+        {"min_exclusive": 6, "max": 10, "label": "High pain interference"}
+      ],
+      "flag": {"min": 7, "label": "High pain interference flag (PEG >= 7)"},
+      "improvement": null
+    },
+    "PDI": {
+      "range": [0, 70],
+      "metric": "Pasted total; no missing-item handling",
+      "bands": [
+        {"min": 0, "max": 20, "label": "Mild disability"},
+        {"min_exclusive": 20, "max": 40, "label": "Moderate disability"},
+        {"min_exclusive": 40, "max": 70, "label": "Severe disability"}
+      ],
+      "flag": {"min": 41, "label": "Severe disability flag (PDI >= 41)"},
+      "improvement": null
+    },
+    "PHQ-9": {
+      "range": [0, 27],
+      "metric": "Pasted total; no prorating",
+      "bands": [
+        {"min": 0, "max": 4, "label": "Minimal depressive symptoms"},
+        {"min_exclusive": 4, "max": 9, "label": "Mild depressive symptoms"},
+        {"min_exclusive": 9, "max": 14, "label": "Moderate depressive symptoms"},
+        {"min_exclusive": 14, "max": 19, "label": "Moderately severe depressive symptoms"},
+        {"min_exclusive": 19, "max": 27, "label": "Severe depressive symptoms"}
+      ],
+      "flag": {"min": 15, "label": "Elevated mood symptom burden (PHQ-9 >= 15)"},
+      "item9": {
+        "trigger_min_exclusive": 0,
+        "positive_label": "Positive SI item; risk assessment indicated",
+        "zero_label": "No SI endorsed on item #9",
+        "missing_label": "Not documented",
+        "overrides_total": false
+      }
+    },
+    "PHQ-4": {
+      "range": [0, 12],
+      "metric": "Pasted total; used only when PHQ-9 is absent",
+      "bands": [
+        {"min": 0, "max": 2, "label": "Minimal mood/anxiety symptoms"},
+        {"min_exclusive": 2, "max": 5, "label": "Mild mood/anxiety symptoms"},
+        {"min_exclusive": 5, "max": 8, "label": "Moderate mood/anxiety symptoms"},
+        {"min_exclusive": 8, "max": 12, "label": "Severe mood/anxiety symptoms"}
+      ],
+      "flag": {"min": 6, "label": "Elevated mood symptom burden (PHQ-4 >= 6)"}
+    },
+    "ORT": {
+      "range": [0, 26],
+      "metric": "Pasted total; one scale for every ORT version (no ORT-OUD distinction). A level word on the 'ORT:' line overrides the computed level.",
+      "bands": [
+        {"min": 0, "max": 3, "label": "Low Risk"},
+        {"min_exclusive": 3, "max": 7, "label": "Moderate Risk"},
+        {"min_exclusive": 7, "max": 26, "label": "High Risk"}
+      ],
+      "flag": {"min": 4, "label": "ORT moderate/high baseline risk (ORT >= 4)"}
+    },
+    "COMM": {
+      "range": [0, 68],
+      "metric": "Pasted total; accepted as '/ 64', '/ 68' or '/ 28', and the >= 9 cutoff is applied to all of them",
+      "bands": [
+        {"min": 0, "max_exclusive": 9, "label": "Below elevated misuse-risk threshold"},
+        {"min": 9, "max": 68, "label": "Elevated opioid misuse-risk signal"}
+      ],
+      "flag": {"min": 9, "label": "Elevated COMM (>= 9)"}
+    }
+  },
+  "integrated_risk": {
+    "description": "Sum of risk points; PHQ-4 points apply only when PHQ-9 is absent.",
+    "points": {
+      "COMM": [{"min": 18, "points": 3}, {"min": 9, "points": 2}],
+      "ORT": [{"min": 8, "points": 3}, {"min": 4, "points": 1}],
+      "PHQ-9": [{"min": 20, "points": 2}, {"min": 15, "points": 1}],
+      "PHQ-4": [{"min": 9, "points": 2}, {"min": 6, "points": 1}],
+      "PHQ-9 item 9": [{"min_exclusive": 0, "points": 3}],
+      "UDS/PDMP": {"discordant": 3, "requires_review": 2},
+      "Refill behavior": {"early_or_escalation": 2, "lost_stolen": 2, "intermittent": 1, "requires_review": 1},
+      "Clinical context": {
+        "per_code": {"elevated_misuse": 2, "escalation": 2, "discordant": 2, "worsening": 1, "mood": 1, "aberrancy_history": 1},
+        "cap": 3
+      }
+    },
+    "levels": [
+      {"min": 5, "label": "High", "repeat_interval": "Repeat battery every 3 months"},
+      {"min": 2, "label": "Moderate", "repeat_interval": "Repeat battery every 6 months"},
+      {"min": 0, "label": "Low", "repeat_interval": "Repeat battery yearly / every 12 months"}
+    ]
+  },
+  "concern_codes": {
+    "UDS/PDMP": ["requires_review", "discordant"],
+    "Refill behavior": ["intermittent", "early_or_escalation", "lost_stolen", "requires_review"],
+    "Clinical context": ["worsening", "escalation", "elevated_misuse", "mood", "discordant", "aberrancy_history"],
+    "default_context": "routine"
+  },
+  "labels": {
+    "UDS/PDMP": {
+      "not_reviewed": "Not reviewed / not available at time of assessment",
+      "consistent": "Consistent with prescribed medication regimen and no concerning PDMP findings",
+      "uds_consistent_pdmp_ok": "UDS consistent; PDMP review without concerning findings",
+      "uds_pending_pdmp_ok": "UDS pending; PDMP review without concerning findings",
+      "requires_review": "UDS/PDMP findings require provider review and closer monitoring",
+      "discordant": "Discordant UDS and/or concerning PDMP findings noted"
+    },
+    "Refill behavior": {
+      "stable": "Stable refill behavior without early refill pattern",
+      "no_concerns": "No concerning refill behavior reported at this interval",
+      "intermittent": "Intermittent refill timing concerns requiring monitoring",
+      "early_or_escalation": "Early refill request or dose-escalation request noted",
+      "lost_stolen": "Lost/stolen medication report or medication-management concern noted",
+      "requires_review": "Refill behavior requires provider review and closer monitoring"
+    },
+    "Clinical context": {
+      "routine": "Routine interval chronic opioid monitoring",
+      "high_pain": "High pain interference with ongoing opioid therapy",
+      "worsening": "Worsening pain/function trajectory",
+      "escalation": "Opioid escalation request",
+      "elevated_misuse": "Elevated opioid misuse-risk screen",
+      "mood": "Mood deterioration affecting pain/opioid risk",
+      "discordant": "Discordant UDS/PDMP or refill concern",
+      "aberrancy_history": "Documented history of opioid-related aberrant medication-use behavior",
+      "post_procedure": "Post-procedure / post-intervention reassessment",
+      "agreement": "Treatment agreement / opioid safety reassessment"
+    }
+  },
+  "qhp_time_split": {
+    "description": "Fractions of total minutes, each rounded with a minimum of 1; feedback gets the remainder (minimum 0) and any rounding drift is added to documentation.",
+    "review": 0.20,
+    "integration": 0.35,
+    "decision": 0.25,
+    "documentation": 0.15,
+    "feedback": "remainder"
+  },
+  "icd10_codes": {
+    "always_included": true,
+    "codes": {
+      "F11.20": "Opioid dependence, uncomplicated",
+      "G89.4": "Chronic pain syndrome"
+    }
+  }
+}

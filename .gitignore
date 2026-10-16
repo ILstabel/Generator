@@ -6,3 +6,6 @@ venv/
 .env.*
 !.env.example
 .streamlit/secrets.toml
+patient_forms/
+patient_results/
+generator

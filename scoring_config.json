@@ -1,0 +1,70 @@
+{
+  "version": "2026-10-15",
+  "description": "Clinical evaluation reference table supplied by the user. The application reads interpretation labels, cutoffs and improvement rules from this file. Bands are inclusive integer ranges; a fractional score (for example a mean-imputed PDI) uses the band whose minimum it has reached.",
+  "instruments": {
+    "PEG": {
+      "range": [0, 10],
+      "metric": "Continuous average of 3 items",
+      "bands": [],
+      "interpretation": "Tracking metric; compare over time, not diagnostic.",
+      "improvement": {"min_point_drop": 1.0, "min_percent_drop": 30, "rule": "any"}
+    },
+    "PDI": {
+      "range": [0, 70],
+      "metric": "Integer sum of 7 domains",
+      "bands": [
+        {"min": 0, "max": 20, "label": "Mild disability"},
+        {"min": 21, "max": 40, "label": "Moderate disability"},
+        {"min": 41, "max": 70, "label": "Severe disability"}
+      ],
+      "improvement": {"min_percent_drop": 30}
+    },
+    "PHQ-9": {
+      "range": [0, 27],
+      "metric": "Integer sum of items 1-9",
+      "positive_cutoff": 10,
+      "bands": [
+        {"min": 0, "max": 4, "label": "Minimal"},
+        {"min": 5, "max": 9, "label": "Mild"},
+        {"min": 10, "max": 14, "label": "Moderate (standard clinical positive cutoff)"},
+        {"min": 15, "max": 19, "label": "Moderately Severe"},
+        {"min": 20, "max": 27, "label": "Severe depression risk"}
+      ],
+      "guardrail": {
+        "item": 9,
+        "trigger_min": 1,
+        "label": "URGENT ACTION TRIGGER: PHQ-9 item 9 >= 1 overrides the total score; high risk for self-harm flagged"
+      }
+    },
+    "ORT-OUD": {
+      "range": [0, 9],
+      "metric": "Sum of 9 equally weighted Yes/No risk factors",
+      "table_as_supplied": "0-26 sex-weighted sum",
+      "scoring_note": "The supplied table lists a 0-26 sex-weighted range, which describes the original 2005 ORT. No sex weights were supplied, and the scanned forms use the 9 equally weighted Yes/No ORT-OUD factors, so the score stays 0-9 and the supplied cutoff (<3 / >=3) is applied.",
+      "bands": [
+        {"min": 0, "max": 2, "label": "Low risk for Opioid Use Disorder"},
+        {"min": 3, "max": 9, "label": "High risk for Opioid Use Disorder"}
+      ]
+    },
+    "AUDIT": {
+      "range": [0, 40],
+      "metric": "Item-weighted sum",
+      "positive_cutoff": 8,
+      "bands": [
+        {"min": 0, "max": 7, "label": "Low-risk consumption"},
+        {"min": 8, "max": 14, "label": "Hazardous/harmful drinking (positive cutoff)"},
+        {"min": 15, "max": 40, "label": "Likely alcohol dependence"}
+      ]
+    },
+    "COMM": {
+      "range": [0, 68],
+      "metric": "Sum of 17 items scored 0-4; standard form only",
+      "table_as_supplied": "Not in the supplied table; earlier supplied rule retained",
+      "bands": [
+        {"min": 0, "max": 8, "label": "Negative current-misuse screen (<9); does not rule out misuse. Continue appropriate monitoring."},
+        {"min": 9, "max": 68, "label": "Positive current-misuse screen (>=9); further clinician assessment is warranted, not a diagnosis."}
+      ],
+      "modified_form_label": "Modified form: standard COMM cutoff not applied; interpretation requires version-specific rules."
+    }
+  }
+}
