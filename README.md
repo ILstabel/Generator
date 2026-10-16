@@ -20,6 +20,9 @@
    **Calculate and save scores**. The included forms (`10001`-`10003`) are
    synthetic test forms, not real patients.
 
+For step-by-step instructions, worked examples and troubleshooting, see the
+[User Manual](USER_MANUAL.md).
+
 Everything runs on your own computer; no forms or results are uploaded.
 Results are written to a `patient_results` folder, which Git ignores. New PDFs
 you add to `patient_forms` are also ignored by Git, so real patient forms are
@@ -57,9 +60,31 @@ risk banner is green for Low, amber for Moderate, red for High and grey when
 the assessment is incomplete.
 
 The app has three tabs: **Assessment** (forms, scores and reports),
-**Insights** (research-data charts) and **About** (a plain-language summary of
+**Insights** (charts of the clinic's saved assessments and patient trends) and **About** (a plain-language summary of
 what the app does, how risk points are calculated, and the questionnaire
 scoring rules with references).
+
+## Sharing a public demo (Streamlit Community Cloud)
+
+Use made-up forms only. Everything in `patient_forms/` that is committed to
+GitHub is visible to every visitor of the demo.
+
+1. Push this repository to GitHub.
+2. Sign in at <https://share.streamlit.io> with GitHub and choose **Create app**.
+3. Pick the repository, branch `main` and main file `app.py`. Under
+   **Advanced settings**, choose Python 3.12 and paste this into **Secrets**:
+
+   ```toml
+   DEMO_MODE = "true"
+   ```
+
+   This shows a "do not enter real patient information" banner.
+4. Choose **Deploy**. When it is running, open the app's **Share** settings and
+   make it public to get a link anyone can open.
+
+Saved results on the demo are shared by all visitors and are cleared whenever
+the site restarts or redeploys. `requirements.txt` pins the versions the tests
+were run with.
 
 ## Assessment workflow
 
@@ -210,8 +235,8 @@ COMM-16 Total: 0 / 64
 ORT: 4 / Moderate Risk
 ```
 
-PEG can also be entered as `PEG Average: 8 / 10`. PHQ-4 is supported, for
-example `PHQ4: 6 / 12`. Explicit COMM maxima of 68, 64 and 28 are supported;
+PEG can also be entered as `PEG Average: 8 / 10`. Only PHQ-9 is scored for
+mood. Explicit COMM maxima of 68, 64 and 28 are supported;
 an unspecified form defaults to 68 **with a review warning**. Repeated score
 labels, invalid ranges, inconsistent denominators and conflicting ORT labels
 are flagged rather than silently resolved. The parser is a convenience for
@@ -234,7 +259,7 @@ the tab shows a message and the assessment workflow is unaffected.
 
 ## Questionnaire scoring rules
 
-Interpretation labels, bands, cutoffs and improvement criteria are read from
+Interpretation labels, bands, thresholds and improvement criteria are read from
 [`scoring_config.json`](scoring_config.json) (the clinical evaluation reference
 table). `scoring_config.py` validates it when the app starts: every instrument
 must be present and bands must be contiguous, non-overlapping and cover the
@@ -247,23 +272,20 @@ methods (sums, proration, imputation) stay in code.
 |---|---|---|---|
 | **PEG** | 0.0-10.0 | Continuous average | Tracking metric. Improvement: drop **>=1.0 point OR >=30%** |
 | **PDI** | 0-70 | Integer sum | **0-20** Mild disability; **21-40** Moderate disability; **41-70** Severe disability (original HTML template bands). Improvement: >=30% reduction from baseline |
-| **PHQ-9** | 0-27 | Integer sum | **0-4** Minimal; **5-9** Mild; **10-14** Moderate (standard clinical positive cutoff); **15-19** Moderately Severe; **20-27** Severe depression risk |
+| **PHQ-9** | 0-27 | Integer sum | **0-4** Minimal; **5-9** Mild; **10-14** Moderate (standard clinical positive threshold); **15-19** Moderately Severe; **20-27** Severe depression risk |
 | **PHQ-9 guardrail** | Item 9 | Any response >=1 | **Urgent action trigger**: overrides the total score; flags high risk for self-harm |
 | **ORT-OUD** | 0-9 | 9 equally weighted Yes/No factors | **<3** Low risk for Opioid Use Disorder; **>=3** High risk for Opioid Use Disorder |
-| **AUDIT** | 0-40 | Item-weighted sum | **0-7** Low-risk consumption; **8-14** Hazardous/harmful drinking (positive cutoff); **>=15** Likely alcohol dependence |
 | **COMM** | 0-68 | Standard 17-item sum | **>=9** positive screen; **<9** negative. Modified forms (e.g. COMM-16) get no standard interpretation |
 
 Notes on the supplied table:
 - **ORT-OUD:** the supplied table lists "0-26 sex-weighted sum", which
   describes the original 2005 ORT. No sex weights were supplied, and the
   scanned forms use nine equally weighted Yes/No ORT-OUD factors, so scoring
-  stays 0-9 and the supplied <3 / >=3 cutoff is applied.
-- **AUDIT** interpretation is configured, but the scanned six-page forms do not
-  contain AUDIT, so the app has no AUDIT entry screen yet.
+  stays 0-9 and the supplied <3 / >=3 threshold is applied.
 - **COMM** is not in the supplied table; the earlier supplied rules are kept.
 
 [`html_config.json`](html_config.json) is a separate, reference-only record of
-the original `Generator New.html` parameters: its PEG/PDI/PHQ-9/PHQ-4/ORT/COMM
+the original `Generator New.html` parameters: its PEG/PDI/PHQ-9/ORT/COMM
 bands and flags, integrated-risk points and levels, UDS/PDMP, refill and
 context labels, QHP time split, and ICD-10 codes. The app does not read it;
 use it to compare the original HTML behavior with `scoring_config.json`.
@@ -273,7 +295,7 @@ use it to compare the original HTML behavior with `scoring_config.json`.
 | **PHQ-9** | Nine-item scoring, proration for 1-2 missing answers, provisional answered-item sum for 3+, configured bands, item 9 guardrail, and separate functional impairment |
 | **PEG** | Three-item mean (mean of answered items when blank), rounded clinical score, exact mean retained, and configured improvement rule against a prior score |
 | **PDI** | Seven-domain sum, mean imputation for one missing domain, provisional answered-domain sum for 2+, configured bands, and baseline percentage change |
-| **ORT-OUD** | Nine equally weighted Yes/No factors; blanks skipped; configured cutoff; kept separate from original ORT |
+| **ORT-OUD** | Nine equally weighted Yes/No factors; blanks skipped; configured threshold; kept separate from original ORT |
 | **COMM** | Standard 17-item sum, no reverse scoring, blanks skipped, positive screen >=9; modified forms clearly distinguished |
 
 ### Blank or unanswered items
@@ -322,10 +344,9 @@ Never convert an unclear or double-marked answer to zero.
   following the APA clinician instructions. The app uses half-up rounding
   (13.5 becomes 14), not Python's ties-to-even rounding.
 - At least 3 missing: answered items are added up as a **PROVISIONAL** total
-  and the blank items are flagged for review. A PHQ-4 result does not
-  make an incomplete PHQ-9 complete.
+  and the blank items are flagged for review.
 - Severity (configured): **0-4 Minimal**, **5-9 Mild**, **10-14 Moderate
-  (standard clinical positive cutoff)**, **15-19 Moderately Severe**,
+  (standard clinical positive threshold)**, **15-19 Moderately Severe**,
   **20-27 Severe depression risk**. Screening severity is not a diagnosis.
 - Any observed **item 9 >= 1** is an **urgent action trigger** that overrides
   the total-score interpretation, and requires an **immediate clinician
@@ -439,7 +460,7 @@ The original ORT option remains available for existing forms with its original
   **<9: negative screen**, not proof of absence of misuse; continue appropriate
   monitoring. A screen does not establish opioid use disorder or independently
   determine treatment.
-- Some settings use a cutoff of 13 for greater specificity. This app uses the
+- Some settings use a threshold of 13 for greater specificity. This app uses the
   supplied default **9** only; it does not silently select an alternative.
 - Item-level scoring comes from the scanned form; a reviewer-verified total
   can also be entered. Missing/unresolved answers are skipped: the sum
@@ -447,8 +468,8 @@ The original ORT option remains available for existing forms with its original
   item is flagged for review. No imputation/proration is applied.
 - The supplied 16-item form and the previously supported 7-item format are
   labeled **modified forms**. Their raw totals (0-64 / 0-28) are interpreted
-  with the standard >=9 cutoff, as in the original HTML template, and labeled
-  as such; no version-specific cutoff has been validated. Do not assume the
+  with the standard >=9 threshold, as in the original HTML template, and labeled
+  as such; no version-specific threshold has been validated. Do not assume the
   16-item form is simply the standard instrument minus one identifiable question.
 - Changing the selected COMM form clears prior totals/item responses and
   review confirmations so scores cannot silently cross versions.
@@ -468,8 +489,7 @@ Sources:
   prediction model**. The app does not establish diagnoses, treatment decisions,
   billing eligibility or acute suicide risk.
 - Classification requires PEG, PDI, COMM, ORT and a PHQ-9 total with item 9
-  (a PHQ-4 total is accepted only from pasted text; its review field is hidden
-  unless one was pasted). UDS/PDMP and refill reviews are recommended but do not
+  (no other mood scale substitutes for PHQ-9). UDS/PDMP and refill reviews are recommended but do not
   block the risk level.
   ORT was previously optional; it is now required for classification to avoid
   treating an unknown baseline-risk input as negative. Pending UDS is incomplete.
@@ -478,18 +498,24 @@ Sources:
   and safety alerts remain visible. Missing flags read **Not assessed**.
   Completeness refers only to app-required fields, not comprehensive clinical care.
 - The formula assigns COMM 2 points at 9 and 3 at 18; ORT 1 at 4 and 3 at 8
-  (Original ORT and ORT-OUD); PHQ-9 1 at 15 and 2 at 20, or PHQ-4 1 at 6 and 2 at 9.
+  (Original ORT and ORT-OUD); PHQ-9 1 at 15 and 2 at 20.
   Positive item 9 adds 3. Discordant UDS/PDMP adds 3, provider-review findings
   add 2. Early/lost refill concerns add 2; intermittent/review concerns add 1.
   Context adds up to 3 points. Low is 0-1, Moderate 2-4, High 5 or more.
+- These are the defaults (**Original template** preset). The sidebar's
+  **Risk Thresholds** section offers Conservative and Lenient presets and a
+  Custom option that move the COMM, ORT and PHQ-9 thresholds and the
+  Moderate/High point totals (defined in `risk_thresholds.py`). Points per
+  tier, item 9, UDS/PDMP, refill and context rules do not change. Custom
+  values are checked (moderate below high); invalid values fall back to the
+  default. Non-default thresholds are noted in the report, Score Summary and
+  saved record; the choice lasts for the browser session only.
 - PEG and PDI are continuous tracking measures, not risk-point inputs.
-  PHQ-9 takes precedence over PHQ-4 for both
-  risk points and mood flags when both are supplied.
 - Retained source repeat guidance is 3 months for High, 6 for Moderate and 12
   for Low, subject to clinician review.
 - A positive PHQ-9 item 9 produces an independent immediate-assessment alert.
-  A zero response does not rule out risk; an absent response is not negative.
-  PHQ-4 does not assess suicidal ideation.
+  A zero response is a complete, normal answer (no suicidal ideation endorsed);
+  only a blank item 9 is flagged as not documented, and is never treated as 0.
 - Original ORT is checked for non-negative whole numbers only; ORT-OUD
   is restricted to whole-number totals 0-9.
 
@@ -498,7 +524,7 @@ Sources:
 The suite uses standard-library `unittest` and Streamlit's installed testing API:
 
 ```powershell
-python -m unittest -v test_app test_form_reader test_population
+python -m unittest -v test_app test_form_reader test_clinic_insights
 ```
 
 Tests cover parsing, validation, exact scoring boundaries, missing information,
@@ -509,7 +535,7 @@ item 9 alerts, functional impairment, PEG rounding/change, PDI mean imputation,
 missing-response limits and baseline comparisons.
 ORT-OUD coverage verifies binary scoring, the 2/3 boundary, explicit version
 selection, missing responses, total range and template risk points.
-COMM tests cover the full 0-68 range, no reverse scoring, the 8/9 cutoff,
+COMM tests cover the full 0-68 range, no reverse scoring, the 8/9 threshold,
 partial subtotals, modified-form labeling and clearing scores on form changes.
 Synthetic scan tests cover date-folder discovery, multiple PDFs, checkbox/circle
 detection, blank and double marks, unsupported PDFs, mandatory response review,

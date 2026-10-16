@@ -2,7 +2,8 @@
 
 Each patient code has exactly one score record directly in the results folder:
 ``patient_results/<code>_score.json`` and ``patient_results/<code>_score.txt``. Every save overwrites
-them, so re-running a calculation never creates copies or sub-folders.
+them, so re-running a calculation never creates copies or sub-folders. ``<code>_history.json`` keeps the
+totals of every saved visit (one entry per visit date, replaced when that visit is saved again) for trends.
 """
 
 import json
@@ -133,6 +134,7 @@ def save_record(
     }
     _write_atomic(directory / report_name, report)
     _write_atomic(directory / data_name, json.dumps(record, indent=2, ensure_ascii=False))
+    _update_history(code, directory, record, previous)
     _remove_old_copies(code, directory)
     replaced = ""
     if previous:
@@ -146,3 +148,66 @@ def patient_history(code: str, root: Path | None = None) -> list[dict[str, Any]]
         return []
     record = load_record(code, root)
     return [record] if record else []
+
+
+HISTORY_SCORES = ("phq9", "item9", "peg_avg", "pdi", "ort", "ort_version", "comm", "comm_max")
+
+
+def history_file_name(code: str) -> str:
+    return f"{code}_history.json"
+
+
+def visit_entry(record: dict[str, Any]) -> dict[str, Any]:
+    """Totals-only summary of a saved record for the patient's visit history."""
+    scores = record.get("scores") or {}
+    thresholds = next(
+        (row.get("result") for row in record.get("score_summary") or [] if row.get("measure") == "Risk Thresholds"),
+        None,
+    )
+    return {
+        "visit_folder": record["visit_folder"],
+        "saved_at": record.get("saved_at"),
+        "status": record.get("status"),
+        "status_label": record.get("status_label"),
+        "source_pdf": record.get("source_pdf"),
+        "integrated_risk": record.get("integrated_risk"),
+        "risk_thresholds": thresholds,
+        "scores": {key: scores.get(key) for key in HISTORY_SCORES},
+    }
+
+
+def _read_history(code: str, root: Path | None) -> list[dict[str, Any]] | None:
+    path = record_dir(code, root) / history_file_name(code)
+    if not path.is_file():
+        return None
+    try:
+        visits = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise RecordError(f"Cannot read visit history {path}: {error}") from error
+    if not isinstance(visits, list):
+        raise RecordError(f"Cannot read visit history {path}: expected a list of visits.")
+    return visits
+
+
+def visit_history(code: str, root: Path | None = None) -> list[dict[str, Any]]:
+    """Every saved visit for a patient code, oldest first; one entry per visit date (the latest save of that visit).
+
+    Records saved before visit history existed contribute their single latest visit.
+    """
+    if not PATIENT_CODE.fullmatch(code):
+        return []
+    visits = _read_history(code, root)
+    if visits is None:
+        record = load_record(code, root)
+        visits = [visit_entry(record)] if record else []
+    return sorted(visits, key=lambda visit: visit["visit_folder"])
+
+
+def _update_history(code: str, directory: Path, record: dict[str, Any], previous: dict[str, Any] | None) -> None:
+    visits = _read_history(code, directory)
+    if visits is None:
+        visits = [visit_entry(previous)] if previous and valid_folder(str(previous.get("visit_folder", ""))) else []
+    entry = visit_entry(record)
+    visits = [visit for visit in visits if visit.get("visit_folder") != entry["visit_folder"]] + [entry]
+    visits.sort(key=lambda visit: visit["visit_folder"])
+    _write_atomic(directory / history_file_name(code), json.dumps(visits, indent=2, ensure_ascii=False))

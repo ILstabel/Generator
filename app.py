@@ -1,5 +1,6 @@
 import html
 import math
+import os
 import re
 from typing import Any, Literal, TypedDict
 
@@ -7,9 +8,13 @@ import pandas as pd
 import streamlit as st
 
 from form_reader import FormInspection
+from clinic_insights import clinic_insights_view
 from patient_forms_ui import ReviewedForm, form_key, patient_forms_sidebar, review_patient_forms, saved_records_view, show_full_table
 from patient_records import RecordError, patient_code, save_record
-from population_insights import population_view
+from risk_thresholds import (
+    CUSTOM, DEFAULT, DEFAULT_PRESET, PRESETS, SECTIONS, Thresholds, make_thresholds, rule_label, rule_text,
+    tiered_points, validate_cutoffs,
+)
 from scoring_config import CONFIG, band_label, band_table, instrument
 
 UDS_LABELS = {
@@ -60,7 +65,6 @@ class Scores(AssessmentDetails):
     peg_avg: float | None
     pdi: float | None
     phq9: float | None
-    phq4: float | None
     item9: float | None
     comm: float | None
     ort: float | None
@@ -73,10 +77,10 @@ class ParsedScores(TypedDict):
     warnings: list[str]
 
 
-ScoreKey = Literal["peg_avg", "pdi", "phq9", "phq4", "item9", "comm", "ort"]
+ScoreKey = Literal["peg_avg", "pdi", "phq9", "item9", "comm", "ort"]
 SCORE_LABELS: dict[ScoreKey, str] = {
     "peg_avg": "PEG average", "pdi": "PDI", "phq9": "PHQ-9",
-    "phq4": "PHQ-4", "item9": "PHQ-9 item #9", "comm": "COMM", "ort": "ORT",
+    "item9": "PHQ-9 item #9", "comm": "COMM", "ort": "ORT",
 }
 DIAGNOSES = {
     "F11.20": "Opioid dependence, uncomplicated",
@@ -89,10 +93,6 @@ MODEL_NOTICE = (
     "(>=4: 1; >=8: 3) apply to both Original ORT and ORT-OUD totals; these mappings are not validated for "
     "modified COMM forms or ORT-OUD."
 )
-PHQ9_RESPONSES = {
-    0: "Not at all", 1: "Several days",
-    2: "More than half the days", 3: "Nearly every day",
-}
 PHQ9_FUNCTION = [
     "Not difficult at all", "Somewhat difficult", "Very difficult", "Extremely difficult",
 ]
@@ -101,7 +101,6 @@ PEG_SOURCE = "https://northwestpainguidance.org/wp-content/uploads/2016/05/PEG-3
 PDI_SOURCE = "https://pmc.ncbi.nlm.nih.gov/articles/PMC6137945/"
 ORT_OUD_SOURCE = "https://nida.nih.gov/nidamed-medical-health-professionals/screening-tools-resources/opioid-risk-tool-oud-ort-oud"
 COMM_SOURCE = "https://www.utahmed.org/Common/Uploaded%20files/Docs/CS_Resources/COMM%20-%20Current%20Opioid%20Misuse%20Measure.pdf"
-COMM_RESPONSES = {0: "Never", 1: "Seldom", 2: "Sometimes", 3: "Often", 4: "Very Often"}
 ORT_OUD_FACTORS = [
     "Family history: alcohol abuse", "Family history: illegal drug abuse",
     "Family history: prescription drug abuse", "Personal history: alcohol abuse",
@@ -109,14 +108,10 @@ ORT_OUD_FACTORS = [
     "Age 16-45 years", "History of depression",
     "History of ADD, OCD, bipolar disorder or schizophrenia",
 ]
-PDI_DOMAINS = [
-    "Family/home responsibilities", "Recreation", "Social activity",
-    "Occupation", "Sexual behavior", "Self-care", "Life-support activity",
-]
 NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
 LABEL_PATTERN = re.compile(
     r"(?<!\w)(?P<label>PHQ\s*-?\s*9\s+item\s*#?\s*9|Question\s*#?\s*9|Item\s*#?\s*9"
-    r"|PEG(?:\s+(?:Average|Avg))?|PDI|PHQ\s*-?\s*[94]|COMM(?:\s*-?\s*(?:17|16|7))?|ORT(?:\s*-\s*OUD)?)"
+    r"|PEG(?:\s+(?:Average|Avg))?|PDI|PHQ\s*-?\s*9|COMM(?:\s*-?\s*(?:17|16|7))?|ORT(?:\s*-\s*OUD)?)"
     r"(?!\w)(?:[ \t]+(?:Score|Total))?[ \t]*(?:[:=.]?[ \t]*)(?:Answer[ \t]*:[ \t]*)?",
     re.IGNORECASE,
 )
@@ -124,7 +119,7 @@ LABEL_PATTERN = re.compile(
 
 def empty_scores() -> Scores:
     return {
-        "peg_avg": None, "pdi": None, "phq9": None, "phq4": None,
+        "peg_avg": None, "pdi": None, "phq9": None,
         "item9": None, "comm": None, "ort": None, "comm_max": 68,
     }
 
@@ -309,7 +304,7 @@ def calculate_comm(items: list[float | None], maximum: int = 68) -> float | None
 
 
 def comm_scoring_note(scores: Scores) -> str:
-    form = "Standard 17-item COMM" if scores["comm_max"] == 68 else f"Modified {scores['comm_max'] // 4}-item form; standard >=9 cutoff applied per original template"
+    form = "Standard 17-item COMM" if scores["comm_max"] == 68 else f"Modified {scores['comm_max'] // 4}-item form; standard >=9 threshold applied per original template"
     if "comm_items" not in scores:
         return form + ". Entered total; item completeness must be verified by the reviewer."
     items = scores["comm_items"]
@@ -379,7 +374,7 @@ def validate_scores(scores: Scores) -> list[str]:
         errors.append("Baseline PDI score must be 0-70 or blank.")
     if scores.get("phq9_function") is not None and scores["phq9_function"] not in PHQ9_FUNCTION:
         errors.append("Select a supported functional-impairment response or leave it blank.")
-    limits = {"peg_avg": 10, "pdi": 70, "phq9": 27, "phq4": 12, "item9": 3, "comm": scores["comm_max"]}
+    limits = {"peg_avg": 10, "pdi": 70, "phq9": 27, "item9": 3, "comm": scores["comm_max"]}
     if version == "ORT-OUD":
         limits["ort"] = 9
     if scores["comm_max"] not in {28, 64, 68}:
@@ -462,7 +457,7 @@ def parse_scores(text: str) -> ParsedScores:
             denominator = re.match(rf"/\s*({NUMBER})(?![\w.])", tail)
             if tail.startswith("/") and denominator is None and key != "ort":
                 errors.append(f"{name}: unreadable denominator.")
-            maxima = {"peg_avg": 10, "pdi": 70, "phq9": 27, "phq4": 12, "item9": 3}
+            maxima = {"peg_avg": 10, "pdi": 70, "phq9": 27, "item9": 3}
             if denominator and key in maxima and float(denominator[1]) != maxima[key]:
                 errors.append(f"{name}: expected denominator {maxima[key]}.")
             if key == "comm":
@@ -486,17 +481,9 @@ def parse_scores(text: str) -> ParsedScores:
                     errors.append("ORT stated risk conflicts with its numeric score.")
         scores[key] = value
     errors.extend(validate_scores(scores))
-    if scores["phq9"] is not None and scores["phq4"] is not None:
-        warnings.append("Both mood scales are present. PHQ-9 takes precedence for risk points and mood flags.")
     if not matches and clean.strip():
         errors.append("No supported score labels were recognized. Correct the text or use manual entry.")
     return {"scores": scores, "errors": errors, "warnings": warnings}
-
-
-def severity_peg(value: float | None) -> str:
-    if value is None:
-        return "Not found"
-    return instrument("PEG")["interpretation"]
 
 
 def peg_interference(value: float | None) -> str:
@@ -526,29 +513,11 @@ def severity_phq9(value: float | None, item9: float | None = None) -> str:
     return label
 
 
-def severity_audit(value: float | None) -> str:
-    if value is None:
-        return "Not found"
-    return band_label("AUDIT", value)
-
-
-def severity_phq4(value: float | None) -> str:
-    if value is None:
-        return "Not found"
-    if value <= 2:
-        return "Minimal mood/anxiety symptoms"
-    if value <= 5:
-        return "Mild mood/anxiety symptoms"
-    if value <= 8:
-        return "Moderate mood/anxiety symptoms"
-    return "Severe mood/anxiety symptoms"
-
-
 def severity_comm(value: float | None, maximum: int = 68) -> str:
     if value is None:
         return "Not found"
     if maximum != 68:
-        return band_label("COMM", value) + " (standard 17-item cutoff applied to modified form, per original template)"
+        return band_label("COMM", value) + " (standard 17-item threshold applied to modified form, per original template)"
     return band_label("COMM", value)
 
 
@@ -565,7 +534,7 @@ def missing_information(scores: Scores, uds_code: str, refill_code: str) -> list
         SCORE_LABELS[key] for key in ("peg_avg", "pdi", "comm", "ort")
         if scores[key] is None
     ]
-    if scores["phq9"] is None and scores["phq4"] is None:
+    if scores["phq9"] is None:
         missing.append("PHQ-9 total")
     for key, (label, names) in ITEM_LABELS.items():
         blanks = blank_items(scores.get(key, []))
@@ -602,18 +571,30 @@ def _blank_text(blanks: list[int], names: tuple[str, ...] | None) -> str:
     return "; ".join(names[index - 1] for index in blanks) if names else "item(s) " + ", ".join(map(str, blanks))
 
 
-def risk_contributions(scores: Scores, uds_code: str, refill_code: str, contexts: list[str]) -> dict[str, int]:
-    """Point rules from the original HTML template; COMM and ORT cutoffs apply to every form version."""
+def active_thresholds() -> Thresholds:
+    """Thresholds chosen in the sidebar for this browser session; the original template outside a running app."""
+    try:
+        value = st.session_state.get("risk_thresholds", DEFAULT)
+    except Exception:
+        return DEFAULT
+    return value if isinstance(value, Thresholds) else DEFAULT
+
+
+def risk_contributions(
+    scores: Scores, uds_code: str, refill_code: str, contexts: list[str], thresholds: Thresholds | None = None,
+) -> dict[str, int]:
+    """Point rules from the original HTML template; COMM and ORT thresholds apply to every form version.
+
+    Thresholds for COMM, ORT and PHQ-9 follow the selected preset (default: original template).
+    """
+    thresholds = thresholds or active_thresholds()
     contributions: dict[str, int] = {}
-    comm, ort = scores["comm"], scores["ort"]
     form = "COMM" if scores["comm_max"] == 68 else f"Modified COMM-{scores['comm_max'] // 4}"
-    contributions[f"{form} (>=18: 3; >=9: 2)"] = 3 if comm is not None and comm >= 18 else 2 if comm is not None and comm >= 9 else 0
+    contributions[f"{form} ({rule_label('COMM', thresholds)})"] = tiered_points(scores["comm"], "COMM", thresholds)
     version = "ORT-OUD" if scores.get("ort_version") == "ORT-OUD" else "Original ORT"
-    contributions[f"{version} (>=8: 3; >=4: 1)"] = 3 if ort is not None and ort >= 8 else 1 if ort is not None and ort >= 4 else 0
+    contributions[f"{version} ({rule_label('ORT', thresholds)})"] = tiered_points(scores["ort"], "ORT", thresholds)
     if scores["phq9"] is not None:
-        contributions["PHQ-9 (>=20: 2; >=15: 1)"] = 2 if scores["phq9"] >= 20 else 1 if scores["phq9"] >= 15 else 0
-    elif scores["phq4"] is not None:
-        contributions["PHQ-4 (>=9: 2; >=6: 1)"] = 2 if scores["phq4"] >= 9 else 1 if scores["phq4"] >= 6 else 0
+        contributions[f"PHQ-9 ({rule_label('PHQ-9', thresholds)})"] = tiered_points(scores["phq9"], "PHQ-9", thresholds)
     contributions["Positive PHQ-9 item #9 (3)"] = 3 if scores["item9"] is not None and scores["item9"] > 0 else 0
     contributions["UDS/PDMP (discordant: 3; requires review: 2)"] = 3 if uds_code == "discordant" else 2 if uds_code == "requires_review" else 0
     contributions["Refill behavior (early/lost: 2; other concern: 1)"] = 2 if refill_code in {"early_or_escalation", "lost_stolen"} else 1 if refill_code in {"intermittent", "requires_review"} else 0
@@ -627,7 +608,9 @@ def risk_contributions(scores: Scores, uds_code: str, refill_code: str, contexts
     return contributions
 
 
-def risk_level(scores: Scores, uds_code: str, refill_code: str, contexts: list[str]) -> str:
+def risk_level(
+    scores: Scores, uds_code: str, refill_code: str, contexts: list[str], thresholds: Thresholds | None = None,
+) -> str:
     errors = validate_scores(scores)
     if errors:
         raise ValueError("\n".join(errors))
@@ -635,8 +618,10 @@ def risk_level(scores: Scores, uds_code: str, refill_code: str, contexts: list[s
         raise ValueError("Unknown clinical context, UDS/PDMP or refill selection.")
     if missing_information(scores, uds_code, refill_code):
         return "Insufficient information"
-    points = sum(risk_contributions(scores, uds_code, refill_code, contexts).values())
-    return "High" if points >= 5 else "Moderate" if points >= 2 else "Low"
+    thresholds = thresholds or active_thresholds()
+    points = sum(risk_contributions(scores, uds_code, refill_code, contexts, thresholds).values())
+    moderate, high = thresholds.get("Overall")
+    return "High" if points >= high else "Moderate" if points >= moderate else "Low"
 
 
 def monitoring_interval(risk: str) -> str:
@@ -668,9 +653,9 @@ def report_sections(report: str) -> list[tuple[str, str]]:
 
 def score_displays(scores: Scores) -> dict[str, str]:
     """Display strings and template wording shared by the score summary and the clinical impression."""
-    phq_label = "PHQ-9" if scores["phq9"] is not None or ("phq9_items" in scores and scores["phq4"] is None) else "PHQ-4"
-    phq_value = scores["phq9"] if scores["phq9"] is not None else scores["phq4"]
-    phq_interpretation = severity_phq9(scores["phq9"], scores["item9"]) if scores["phq9"] is not None else severity_phq4(scores["phq4"])
+    phq_label = "PHQ-9"
+    phq_value = scores["phq9"]
+    phq_interpretation = severity_phq9(scores["phq9"], scores["item9"])
     if scores["phq9"] is not None and "Total-score band" not in phq_interpretation:
         phq_interpretation = f"{band_label('PHQ-9', scores['phq9']).split(' (')[0].capitalize()} depressive symptoms"
     ort_version = scores.get("ort_version", "Original ORT")
@@ -681,7 +666,7 @@ def score_displays(scores: Scores) -> dict[str, str]:
         "pdi": f"{scores['pdi']:g} / 70" if scores["pdi"] is not None else "Not found",
         "pdi_interpretation": band_label("PDI", scores["pdi"]) if scores["pdi"] is not None else "Not found",
         "phq_label": phq_label,
-        "phq_display": f"{phq_value:g} / {'27' if scores['phq9'] is not None else '12'}" if phq_value is not None else "Not found",
+        "phq_display": f"{phq_value:g} / 27" if phq_value is not None else "Not found",
         "phq_interpretation": phq_interpretation,
         "comm": f"{scores['comm']:g}" if scores["comm"] is not None else "Not found",
         "comm_interpretation": comm_signal(scores["comm"]),
@@ -691,7 +676,7 @@ def score_displays(scores: Scores) -> dict[str, str]:
     }
 
 
-def suicide_text(item9: float | None, phq4_only: bool = False) -> str:
+def suicide_text(item9: float | None) -> str:
     if item9 is not None and item9 > 0:
         return (
             "PHQ-9 item #9 is positive. Immediate suicide risk assessment and safety protocol are required, including assessment "
@@ -703,8 +688,6 @@ def suicide_text(item9: float | None, phq4_only: bool = False) -> str:
             "PHQ-9 item #9 = 0. No suicidal ideation endorsed on this measure. Same-day suicide-risk escalation was not "
             "triggered by the PHQ-9 response today."
         )
-    if phq4_only:
-        return "PHQ-9 item #9 not documented. PHQ-4 does not assess suicidal ideation. Assess suicide risk if clinically indicated or if depressive symptoms are elevated."
     return "PHQ-9 item #9 not documented. Assess suicide risk if clinically indicated or if depressive symptoms are elevated."
 
 
@@ -719,7 +702,7 @@ def clinical_impression(
         f"Interval psychological/behavioral testing was completed in the context of {context_text}. "
         f"Results demonstrate {shown['peg_interpretation'].lower()} with PEG average score of {shown['peg']} and "
         f"{shown['pdi_interpretation'].lower()} with PDI score of {shown['pdi']}. {shown['phq_label']} score of "
-        f"{shown['phq_display']} is consistent with {shown['phq_interpretation'].lower()}. {suicide_text(scores['item9'], scores['phq9'] is None and scores['phq4'] is not None)}\n\n"
+        f"{shown['phq_display']} is consistent with {shown['phq_interpretation'].lower()}. {suicide_text(scores['item9'])}\n\n"
         f"Opioid-risk findings were reviewed in the context of chronic opioid monitoring. COMM score of {comm} is interpreted as "
         f"{shown['comm_interpretation']}, and {shown['ort_version']} score of {shown['ort']} reflects baseline opioid-risk factors. "
         f"UDS/PDMP status: {UDS_LABELS[uds_code]}. Refill behavior: {REFILL_LABELS[refill_code]}. "
@@ -732,7 +715,7 @@ def make_report(
     scores: Scores, contexts: list[str], uds_code: str, refill_code: str, minutes: int = 0,
     *, feedback_confirmed: bool = False, time_confirmed: bool = False,
     diagnoses: tuple[str, ...] = (), clinician_verified: bool = False, synthetic: bool = False,
-    context_documented: bool = True,
+    context_documented: bool = True, thresholds: Thresholds | None = None,
 ) -> tuple[str, list[tuple[str, str, str]], dict[str, bool | None], str, str]:
     if minutes < 0 or minutes != int(minutes):
         raise ValueError("Actual QHP time must be a non-negative whole number of minutes.")
@@ -742,7 +725,8 @@ def make_report(
         raise ValueError("Unknown diagnosis selection.")
     if not contexts:
         contexts = ["routine"]
-    risk = risk_level(scores, uds_code, refill_code, contexts)
+    thresholds = thresholds or active_thresholds()
+    risk = risk_level(scores, uds_code, refill_code, contexts, thresholds)
     context_text = "; ".join(CONTEXT_LABELS[c] for c in contexts) if context_documented else (
         "Not documented: automatic record from scanned form; clinician must review clinical context"
     )
@@ -754,15 +738,15 @@ def make_report(
     peg, pdi, phq_label, phq_display = shown["peg"], shown["pdi"], shown["phq_label"], shown["phq_display"]
     comm_display, ort_version, ort_display = shown["comm"], shown["ort_version"], shown["ort"]
     item9 = scores["item9"]
-    suicide = suicide_text(item9, scores["phq9"] is None and scores["phq4"] is not None)
+    suicide = suicide_text(item9)
 
     contexts_concern = {"worsening", "escalation", "elevated_misuse", "mood", "discordant", "aberrancy_history"}
     context_flags = [CONTEXT_LABELS[c] for c in contexts if c in contexts_concern]
-    mood = scores["phq9"] if scores["phq9"] is not None else scores["phq4"]
+    mood = scores["phq9"]
     flags: dict[str, bool | None] = {
         "PEG ≥ 7 — severe pain impact": None if scores["peg_avg"] is None else scores["peg_avg"] >= 7,
         "PDI ≥ 41 — severe disability": None if scores["pdi"] is None else scores["pdi"] >= 41,
-        "Elevated mood symptom burden": None if mood is None else mood >= (15 if scores["phq9"] is not None else 6),
+        "Elevated mood symptom burden": None if mood is None else mood >= 15,
         "PHQ-9 item #9 > 0 — suicide risk assessment indicated": None if item9 is None else item9 > 0,
         "COMM >= 9 — elevated opioid misuse-risk signal": None if scores["comm"] is None else scores["comm"] >= 9,
         "ORT-OUD high screening risk (>=3)" if ort_version == "ORT-OUD" else "ORT moderate/high baseline risk": None if scores["ort"] is None else scores["ort"] >= (3 if ort_version == "ORT-OUD" else 4),
@@ -820,6 +804,13 @@ def make_report(
         "Complete for app-required inputs (not a comprehensive clinical assessment)"
     )
     rows.insert(12 + len(diagnoses), ("Assessment Completeness", completeness, "Missing data are not negative findings"))
+    if not thresholds.is_default:
+        rows.append(("Risk Thresholds", thresholds.preset, "Non-default thresholds (local choice, not validated): " + thresholds.describe()))
+        completeness_line_thresholds = (
+            f"\nRISK THRESHOLDS: {thresholds.preset} - non-default thresholds (local choice, not validated): {thresholds.describe()}"
+        )
+    else:
+        completeness_line_thresholds = ""
 
     flag_lines = "\n".join(f"{'[?] Not assessed:' if checked is None else '[x]' if checked else '[ ]'} {label}" for label, checked in flags.items())
     rows_text = "\n".join(f"{name}: {value}\n  Interpretation: {meaning}" for name, value, meaning in rows[:12 + len(diagnoses)])
@@ -874,7 +865,7 @@ def make_report(
     report = f"""{header}
 
 INTEGRATED OPIOID RISK LEVEL: {risk.upper()}
-RECOMMENDED REPEAT INTERVAL: {repeat}{completeness_line}
+RECOMMENDED REPEAT INTERVAL: {repeat}{completeness_line_thresholds}{completeness_line}
 
 ============================================================
 SCORE SUMMARY
@@ -1210,33 +1201,97 @@ SIDEBAR_STYLE = """
 [data-testid="stSidebar"] { background-color: #CFE6DD; }
 [data-testid="stSidebar"] [data-baseweb="select"] > div,
 [data-testid="stSidebar"] input { background-color: #FFFFFF; }
+[data-testid="stTextArea"]:has(textarea[aria-label="Saved report"]) [data-baseweb="textarea"],
+[data-testid="stTextArea"]:has(textarea[aria-label="Saved report"]) [data-baseweb="base-input"],
+textarea[aria-label="Saved report"] { background-color: #F7FBF9 !important; }
+textarea[aria-label="Saved report"] { color: #1F2933 !important; -webkit-text-fill-color: #1F2933 !important; }
 </style>
 """
+
+
+DEMO_NOTICE = (
+    "Public demo with made-up patient forms. Do not enter real patient information. "
+    "Saved results are shared with every visitor and are cleared when the site restarts."
+)
 
 
 def main() -> None:
     st.set_page_config(page_title="Chronic Pain / Opioid Risk Generator", layout="wide")
     st.markdown(SIDEBAR_STYLE, unsafe_allow_html=True)
     st.title("Chronic Pain / Opioid Risk Generator")
-    assessment_tab, population_tab, about_tab = st.tabs(["Assessment", "Insights", "About"])
-    with about_tab:
-        about_page()
-    with population_tab:
-        population_view(score_phq9=calculate_phq9)
+    if os.environ.get("DEMO_MODE", "").lower() in {"1", "true", "yes"}:
+        st.warning(DEMO_NOTICE)
+    assessment_tab, clinic_tab, about_tab = st.tabs(["Assessment", "Insights", "About"])
+    # The Assessment tab renders first because it builds the sidebar, including the risk thresholds used elsewhere.
     with assessment_tab:
         assessment_page()
+    with about_tab:
+        about_page()
+    with clinic_tab:
+        clinic_insights_view()
 
 
-POINT_RULES = [
-    ("COMM (any form)", "9-17: 2 points; 18 or more: 3 points"),
-    ("ORT / ORT-OUD", "4-7: 1 point; 8 or more: 3 points"),
-    ("PHQ-9 total", "15-19: 1 point; 20 or more: 2 points (PHQ-4 only if no PHQ-9: 6-8: 1; 9 or more: 2)"),
-    ("PHQ-9 item #9 (thoughts of self-harm)", "Any answer above 0: 3 points, plus an urgent safety alert"),
-    ("UDS / PDMP", f"Requires review: 2 points; discordant: 3 points; {UDS_LABELS['not_reviewed'].split(' /')[0].lower()}: 0, listed as pending"),
-    ("Refill behavior", "Intermittent or requires review: 1 point; early/escalation or lost/stolen: 2 points"),
-    ("Clinical context", "Worsening, mood or aberrancy history: 1 each; escalation, elevated misuse or discordant: 2 each; capped at 3"),
-    ("PEG and PDI", "Reported and flagged, but not counted as risk points"),
-]
+def point_rules(thresholds: Thresholds) -> list[tuple[str, str]]:
+    return [
+        ("COMM (any form)", rule_text("COMM", thresholds)),
+        ("ORT / ORT-OUD", rule_text("ORT", thresholds)),
+        ("PHQ-9 total", rule_text("PHQ-9", thresholds)),
+        ("PHQ-9 item #9 (thoughts of self-harm)", "Any answer above 0: 3 points, plus an urgent safety alert"),
+        ("UDS / PDMP", f"Requires review: 2 points; discordant: 3 points; {UDS_LABELS['not_reviewed'].split(' /')[0].lower()}: 0, listed as pending"),
+        ("Refill behavior", "Intermittent or requires review: 1 point; early/escalation or lost/stolen: 2 points"),
+        ("Clinical context", "Worsening, mood or aberrancy history: 1 each; escalation, elevated misuse or discordant: 2 each; capped at 3"),
+        ("PEG and PDI", "Reported and flagged, but not counted as risk points"),
+    ]
+
+
+def level_text(thresholds: Thresholds) -> str:
+    moderate, high = thresholds.get("Overall")
+    return f"Low 0-{moderate - 1} points; Moderate {moderate}-{high - 1}; High {high} or more"
+
+
+def threshold_sidebar() -> None:
+    """Sidebar preset picker for risk-point and risk-level thresholds; stores the result in session state."""
+    st.sidebar.header("Risk Thresholds")
+    choice = st.sidebar.selectbox(
+        "Preset", [*PRESETS, CUSTOM], key="risk_preset",
+        help="Sets which scores add moderate or high risk points for each test, and how many points make "
+             "Moderate or High overall risk. The default reproduces the original template.",
+    )
+    if choice != CUSTOM:
+        thresholds = PRESETS[choice]
+        for section in SECTIONS:
+            moderate, high = thresholds.get(section)
+            st.session_state[f"risk_cut_{section}_moderate"] = moderate
+            st.session_state[f"risk_cut_{section}_high"] = high
+    with st.sidebar.expander("Thresholds" + (" (edit)" if choice == CUSTOM else ""), expanded=choice == CUSTOM):
+        values = {}
+        for section, (name, maximum, moderate_points, high_points) in SECTIONS.items():
+            st.markdown(f"**{name}**")
+            left, right = st.columns(2)
+            moderate_label = "Moderate at (points)" if section == "Overall" else f"Moderate (+{moderate_points}) at"
+            high_label = "High at (points)" if section == "Overall" else f"High (+{high_points}) at"
+            moderate = left.number_input(
+                moderate_label, min_value=1, max_value=maximum, step=1,
+                key=f"risk_cut_{section}_moderate", disabled=choice != CUSTOM,
+            )
+            high = right.number_input(
+                high_label, min_value=1, max_value=maximum, step=1,
+                key=f"risk_cut_{section}_high", disabled=choice != CUSTOM,
+            )
+            values[section] = (int(moderate), int(high))
+    errors = validate_cutoffs(values)
+    if errors:
+        for error in errors:
+            st.sidebar.error(error)
+        st.sidebar.warning("Invalid custom thresholds: the original template thresholds are used until corrected.")
+        st.session_state["risk_thresholds"] = DEFAULT
+        return
+    thresholds = make_thresholds(choice, values)
+    st.session_state["risk_thresholds"] = thresholds
+    if thresholds.is_default:
+        st.sidebar.caption("Using the original template thresholds.")
+    else:
+        st.sidebar.warning("Non-default thresholds are a local choice and have not been validated. Reports and saved records note the preset used.")
 
 
 def about_page() -> None:
@@ -1258,8 +1313,7 @@ def about_page() -> None:
         "5. **Write the report.** A ready-to-file report follows the clinic's original template, including "
         "clinical flags, a suicide-risk statement, treatment guidance, billing codes and time attestation. "
         "Each patient's latest result is saved in the `patient_results` folder.\n\n"
-        "The **Insights** tab shows charts from a public research study of depression and mood, to explore how "
-        "different groups compare. It does not contain this clinic's patients."
+        "The **Insights** tab summarizes this clinic's saved assessments and shows each patient's trend across visits."
     )
     st.info(
         "Support tool only. A qualified clinician must verify scores, interpretations, risk levels, "
@@ -1268,9 +1322,12 @@ def about_page() -> None:
     )
     st.subheader("How the app calculates points")
     st.write(MODEL_NOTICE)
-    show_full_table(pd.DataFrame(POINT_RULES, columns=["Input", "Points"]))
+    thresholds = active_thresholds()
+    if not thresholds.is_default:
+        st.warning(f"Showing the sidebar preset **{thresholds.preset}**, not the original template thresholds.")
+    show_full_table(pd.DataFrame(point_rules(thresholds), columns=["Input", "Points"]))
     st.markdown(
-        "**Overall risk:** Low 0-1 points; Moderate 2-4; High 5 or more.  \n"
+        f"**Overall risk:** {level_text(thresholds)}.  \n"
         "**Repeat interval:** High: every 3 months; Moderate: every 6 months; Low: every 12 months. "
         "Incomplete assessments get no risk level or interval.  \n"
         "Missing information is never treated as a normal (negative) finding."
@@ -1289,14 +1346,14 @@ def about_page() -> None:
         f"**ORT-OUD:** 9 Yes/No factors; Yes = 1. {band_table('ORT-OUD')}. No sex weights supplied. "
         f"Not interchangeable with original ORT and not a diagnosis. [Reference]({ORT_OUD_SOURCE})\n\n"
         f"**Standard COMM:** 17 items over the past 30 days, scored 0-4, sum 0-68, no reverse scoring. "
-        f">=9 positive; <9 negative, not a diagnosis. Modified forms use the same >=9 cutoff, as in the original template (not validated). [Reference]({COMM_SOURCE})\n\n"
-        f"**AUDIT (configured; not on the scanned forms):** {band_table('AUDIT')}.\n\n"
-        f"Labels, bands and cutoffs are loaded from `scoring_config.json` (version {instrument_version()})."
+        f">=9 positive; <9 negative, not a diagnosis. Modified forms use the same >=9 threshold, as in the original template (not validated). [Reference]({COMM_SOURCE})\n\n"
+        f"Labels, bands and thresholds are loaded from `scoring_config.json` (version {instrument_version()})."
     )
 
 
 def assessment_page() -> None:
     inspections = patient_forms_sidebar(save_form=save_form_record)
+    threshold_sidebar()
     review_patient_forms(inspections, form_summary, load_reviewed_form, save_form_record, autofill_from_form)
     saved_records_view()
     st.caption("Support tool only: a qualified clinician must verify all results. Scoring rules and point calculations are in the About tab.")
@@ -1343,9 +1400,7 @@ def assessment_page() -> None:
         key="assessment_comm_max", on_change=change_comm_form,
     )
     fields = st.columns(3)
-    # PHQ-4 is only an alternative for pasted text (original HTML); the scanned forms use PHQ-9.
-    shown_keys = [key for key in SCORE_LABELS if key != "phq4" or st.session_state.get("assessment_phq4") is not None]
-    for index, key in enumerate(shown_keys):
+    for index, key in enumerate(SCORE_LABELS):
         label = SCORE_LABELS[key]
         if key == "ort" and scores["ort_version"] == "ORT-OUD":
             label = "ORT-OUD total / 9"
@@ -1388,11 +1443,9 @@ def assessment_page() -> None:
         )
     if "comm_items" in scores:
         st.caption(comm_scoring_note(scores))
-    if scores["phq9"] is not None and scores["phq4"] is not None:
-        st.warning("Both mood scales entered: PHQ-9 takes precedence for risk points, the summary and mood flags.")
     if scores["comm_max"] != 68:
         st.caption(
-            "Modified COMM form: the standard >=9 cutoff and the original template's points (>=9: 2; >=18: 3) "
+            "Modified COMM form: the standard >=9 threshold and the original template's points (>=9: 2; >=18: 3) "
             "are applied, as in the original HTML."
         )
     if scores["comm"] is not None and math.isfinite(scores["comm"]) and 0 <= scores["comm"] <= scores["comm_max"]:
@@ -1406,11 +1459,9 @@ def assessment_page() -> None:
             "independent of opioid-risk classification. This screening response does not determine acute risk."
         )
     elif scores["item9"] is None:
-        st.warning(
-            "PHQ-9 item #9 not documented." + (" PHQ-4 does not assess suicidal ideation." if scores["phq4"] is not None else "")
-        )
+        st.warning("PHQ-9 item #9 not documented.")
     elif scores["item9"] == 0:
-        st.caption("PHQ-9 item #9 is negative; this does not rule out suicide risk.")
+        st.success("PHQ-9 item #9 = 0: no suicidal ideation endorsed. This is a complete, normal answer.")
 
     left, middle, right = st.columns(3)
     with left:
@@ -1457,6 +1508,7 @@ def assessment_page() -> None:
     inputs = (
         dict(scores), tuple(contexts), uds_code, refill_code, minutes, feedback, time_confirmed,
         tuple(diagnoses), clinician_verified, scores_verified, st.session_state.get("assessment_synthetic", False),
+        active_thresholds(),
     )
     if st.button(
         "Generate reviewed report", type="primary",

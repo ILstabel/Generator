@@ -7,6 +7,7 @@ from pathlib import Path
 from streamlit.testing.v1 import AppTest
 
 from scoring_config import CONFIG_PATH, ConfigError, validate_config
+from risk_thresholds import DEFAULT, DEFAULT_PRESET, PRESETS, make_thresholds, validate_cutoffs
 from app import (
     SAMPLES,
     Scores,
@@ -28,11 +29,8 @@ from app import (
     report_sections,
     risk_contributions,
     risk_level,
-    severity_audit,
     severity_comm,
     severity_pdi,
-    severity_peg,
-    severity_phq4,
     severity_phq9,
     round_clinical,
     validate_scores,
@@ -60,7 +58,7 @@ class ParserTests(unittest.TestCase):
         )
         self.assertEqual(parsed["errors"], [])
         self.assertEqual(parsed["scores"], {
-            "peg_avg": 8.0, "pdi": 40.0, "phq9": 19.0, "phq4": None,
+            "peg_avg": 8.0, "pdi": 40.0, "phq9": 19.0,
             "item9": 0.0, "comm": 0.0, "comm_max": 64, "ort": 4.0,
         })
         for text in ("PEG Avg: 5 / 10", "PEG Average = 5 / 10", "PEG: 4, 5, 6"):
@@ -69,11 +67,17 @@ class ParserTests(unittest.TestCase):
         parsed_rounded = parse_scores("PEG: 6 + 4 + 4 / 3 = 5")
         self.assertEqual(parsed_rounded["errors"], [])
         self.assertAlmostEqual(parsed_rounded["scores"]["peg_avg"], 14 / 3)
-        parsed = parse_scores("PHQ4: 6 / 12\nPHQ-9 item #9: 1\nCOMM-7 Score: 12 / 28")
+        parsed = parse_scores("PHQ-9 item #9: 1\nCOMM-7 Score: 12 / 28")
         self.assertEqual(parsed["errors"], [])
         self.assertIsNone(parsed["scores"]["phq9"])
         self.assertEqual(parsed["scores"]["item9"], 1)
         self.assertEqual(parsed["scores"]["comm_max"], 28)
+
+    def test_phq4_is_not_supported(self):
+        parsed = parse_scores("PHQ4: 6 / 12")
+        self.assertNotIn("phq4", parsed["scores"])
+        self.assertIn("No supported score labels were recognized. Correct the text or use manual entry.", parsed["errors"])
+        self.assertIsNone(parse_scores("PHQ-4: 6\nPDI: 10")["scores"]["phq9"])
 
     def test_duplicate_values_never_silently_choose_one(self):
         for text in ("PHQ9: 3\nPHQ9: 3", "PHQ9: 3 PHQ-9: 20", "PHQ9: 3\nPHQ9: 4\nPHQ9: 5"):
@@ -84,7 +88,7 @@ class ParserTests(unittest.TestCase):
 
     def test_invalid_pasted_values(self):
         invalid = [
-            "PHQ9: 99", "PHQ9: -2", "PHQ9: 1.5", "PHQ4: 13", "Question 9: 4",
+            "PHQ9: 99", "PHQ9: -2", "PHQ9: 1.5", "Question 9: 4",
             "PDI: 71", "PDI: -1", "PEG: 11 + 0 + 0", "PEG: -1 + 5 + 5",
             "PEG: 1 + 2", "PEG: 1.5 + 2 + 3", "PEG: 1 + 2 + 3 + 4", "PEG: 1 + 2 + 3 / 10",
             "PEG: 1 + 2 + 3 / 3 = 9", "PEG Average: 11 / 10", "PEG Average: 4 / 70",
@@ -111,7 +115,7 @@ class ParserTests(unittest.TestCase):
 
 class ValidationAndRiskTests(unittest.TestCase):
     def test_structured_boundaries_and_nonfinite(self):
-        for key, maximum in (("peg_avg", 10), ("pdi", 70), ("phq9", 27), ("phq4", 12), ("item9", 3), ("comm", 68)):
+        for key, maximum in (("peg_avg", 10), ("pdi", 70), ("phq9", 27), ("item9", 3), ("comm", 68)):
             for value in (-1.0, maximum + 1.0, math.nan, math.inf):
                 with self.subTest(key=key, value=value):
                     scores = empty_scores()
@@ -168,11 +172,8 @@ class ValidationAndRiskTests(unittest.TestCase):
                 scores = low_scores()
                 scores[key] = float(value)
                 self.assertEqual(sum(risk_contributions(scores, "consistent", "stable", []).values()), expected)
-        for score, points in ((5, 0), (6, 1), (8, 1), (9, 2)):
-            scores = {**low_scores(), "phq9": None, "phq4": float(score)}
-            self.assertEqual(sum(risk_contributions(scores, "consistent", "stable", []).values()), points)
 
-    def test_risk_cutoffs_and_intervals(self):
+    def test_risk_thresholds_and_intervals(self):
         for contexts, uds, refill, expected in (
             ([], "consistent", "stable", "Low"),
             (["mood"], "consistent", "stable", "Low"),
@@ -188,44 +189,29 @@ class ValidationAndRiskTests(unittest.TestCase):
             sum(risk_contributions(low_scores(), "consistent", "stable", ["escalation", "discordant", "mood"]).values()), 3,
         )
 
-    def test_phq4_does_not_require_item9_but_does_not_imply_negative(self):
-        scores = {**low_scores(), "phq9": None, "phq4": 6.0, "item9": None}
-        self.assertEqual(missing_information(scores, "consistent", "stable"), [])
-        report, _, flags, _, _ = make_report(scores, [], "consistent", "stable")
-        self.assertIn("PHQ-4 does not assess suicidal ideation", report)
-        self.assertIsNone(flags["PHQ-9 item #9 > 0 — suicide risk assessment indicated"])
-
-    def test_mood_precedence_is_consistent(self):
-        scores = {**low_scores(), "phq4": 12.0}
+    def test_missing_phq9_blocks_risk_without_any_substitute(self):
+        scores = {**low_scores(), "phq9": None, "item9": None}
+        self.assertIn("PHQ-9 total", missing_information(scores, "consistent", "stable"))
         report, rows, flags, risk, _ = make_report(scores, [], "consistent", "stable")
-        self.assertEqual(risk, "Low")
-        self.assertFalse(flags["Elevated mood symptom burden"])
-        self.assertNotIn("PHQ-4", [row[0] for row in rows])
-        self.assertIn("PHQ-9", report)
+        self.assertEqual(risk, "Insufficient information")
+        self.assertIsNone(flags["Elevated mood symptom burden"])
+        self.assertNotIn("PHQ-4", report)
+        self.assertNotIn("PHQ-4", " ".join(" ".join(row) for row in rows))
 
     def test_severity_boundaries(self):
         cases = (
             (severity_phq9, 4, "Minimal"), (severity_phq9, 5, "Mild"),
-            (severity_phq9, 10, "Moderate (standard clinical positive cutoff)"), (severity_phq9, 15, "Moderately Severe"),
-            (severity_phq9, 20, "Severe depression risk"), (severity_phq4, 2, "Minimal"),
-            (severity_phq4, 3, "Mild"), (severity_phq4, 6, "Moderate"),
-            (severity_phq4, 9, "Severe"), (severity_comm, 8, "Negative"),
+            (severity_phq9, 10, "Moderate (standard clinical positive threshold)"), (severity_phq9, 15, "Moderately Severe"),
+            (severity_phq9, 20, "Severe depression risk"), (severity_comm, 8, "Negative"),
             (severity_comm, 9, "Positive"),
         )
         for function, score, prefix in cases:
             with self.subTest(function=function.__name__, score=score):
                 self.assertTrue(function(score).startswith(prefix))
-        for score in (0, 4, 7, 10):
-            self.assertIn("not diagnostic", severity_peg(score))
         for score, label in ((0, "Mild"), (20, "Mild"), (20.5, "Mild"), (21, "Moderate"), (40, "Moderate"),
                              (40.5, "Moderate"), (41, "Severe"), (70, "Severe")):
             with self.subTest(pdi=score):
                 self.assertTrue(severity_pdi(score).startswith(label))
-        for score, label in ((0, "Low-risk"), (7, "Low-risk"), (8, "Hazardous"), (14, "Hazardous"), (15, "Likely"), (40, "Likely")):
-            with self.subTest(audit=score):
-                self.assertTrue(severity_audit(score).startswith(label))
-        with self.assertRaises(ValueError):
-            severity_audit(41)
 
     def test_phq9_item9_guardrail_overrides_total(self):
         self.assertTrue(severity_phq9(3, 1).startswith("URGENT ACTION TRIGGER"))
@@ -242,7 +228,7 @@ class ValidationAndRiskTests(unittest.TestCase):
             lambda c: c["instruments"]["PDI"]["bands"][1].update(min=31),
             lambda c: c["instruments"]["PDI"]["bands"][1].update(min=29),
             lambda c: c["instruments"]["PHQ-9"]["bands"][-1].update(max=26),
-            lambda c: c["instruments"].pop("AUDIT"),
+            lambda c: c["instruments"].pop("ORT-OUD"),
             lambda c: c["instruments"]["PEG"]["improvement"].update(rule="either"),
         )
         for mutate in mutations:
@@ -369,6 +355,26 @@ class WorkflowTests(unittest.TestCase):
     def table_text(self):
         return "\n".join(frame.value.to_string() for frame in self.app.dataframe)
 
+    def test_risk_threshold_presets_in_sidebar(self):
+        self.assertEqual(self.app.selectbox(key="risk_preset").value, DEFAULT_PRESET)
+        self.assertTrue(self.app.number_input(key="risk_cut_COMM_moderate").disabled)
+        self.load_sample("Moderate")
+        self.generate()
+        self.assertNotIn("RISK THRESHOLDS:", self.report())
+        self.app.selectbox(key="risk_preset").select("Lenient (flags fewer patients)").run()
+        self.assertFalse(any(field.label == "Generated report" for field in self.app.text_area))
+        self.generate()
+        self.assertIn("RISK THRESHOLDS: Lenient (flags fewer patients)", self.report())
+        about_points = "\n".join(frame.value.to_string() for frame in self.app.tabs[2].dataframe)
+        self.assertIn("12-23: 2 points; 24 or more: 3 points", about_points)
+        self.app.selectbox(key="risk_preset").select("Custom").run()
+        self.assertFalse(self.app.number_input(key="risk_cut_COMM_moderate").disabled)
+        self.assertEqual(self.app.number_input(key="risk_cut_COMM_moderate").value, 12)
+        self.app.number_input(key="risk_cut_Overall_moderate").set_value(9).run()
+        self.app.number_input(key="risk_cut_Overall_high").set_value(4).run()
+        self.assertTrue(any("must be lower than the high threshold" in error.value for error in self.app.sidebar.error))
+        self.assertTrue(self.app.session_state["risk_thresholds"].is_default)
+
     def test_about_tab_holds_summary_rules_and_points(self):
         about = self.app.tabs[2]
         self.assertEqual(about.label, "About")
@@ -414,6 +420,15 @@ class WorkflowTests(unittest.TestCase):
         self.app.text_area(key="assessment_text").set_value("PHQ9: 20").run()
         self.assertFalse(any(field.label == "Generated report" for field in self.app.text_area))
 
+    def test_item9_zero_is_complete_and_not_a_problem(self):
+        self.load_sample("Low")
+        self.app.number_input(key="assessment_item9").set_value(0).run()
+        self.assertTrue(any("no suicidal ideation endorsed" in note.value for note in self.app.success))
+        self.assertFalse(any("item #9" in note.value for note in [*self.app.warning, *self.app.error, *self.app.caption]))
+        self.generate()
+        self.assertIn("No suicidal ideation endorsed", self.report())
+        self.assertNotIn("item #9 not documented", self.report())
+
     def test_incomplete_safety_alert_and_no_interval(self):
         self.load_sample("Incomplete")
         self.assertTrue(any("Safety alert" in error.value for error in self.app.error))
@@ -445,10 +460,6 @@ class WorkflowTests(unittest.TestCase):
     def test_only_evaluator_dropdowns_remain(self):
         self.load_sample("Low")
         self.assertFalse(any(box.key == "assessment_phq4" for box in self.app.number_input))
-        self.app.text_area(key="assessment_text").set_value(SAMPLES["Low"].replace("PHQ9: 3", "PHQ4: 3")).run()
-        self.click("Complete assessment")
-        self.assertEqual(self.app.number_input(key="assessment_phq4").value, 3)
-        self.load_sample("Low")
         keys = {box.key for box in self.app.selectbox if box.key and box.key.startswith("assessment_")}
         self.assertEqual(keys, {"assessment_ort_version", "assessment_comm_max", "assessment_uds", "assessment_refill"})
         self.assertEqual([radio.key for radio in self.app.radio if radio.key and radio.key.startswith("assessment_")], ["assessment_mode"])
@@ -495,7 +506,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNone(self.app.number_input(key="assessment_comm").value)
         self.app.number_input(key="assessment_comm").set_value(23).run()
         self.generate()
-        self.assertIn("Modified 16-item form; standard >=9 cutoff applied per original template", self.report())
+        self.assertIn("Modified 16-item form; standard >=9 threshold applied per original template", self.report())
         self.assertIn("[x] COMM >= 9", self.report())
         self.assertEqual(risk_contributions({**low_scores(), "comm": 23, "comm_max": 64}, "consistent", "stable", [])["Modified COMM-16 (>=18: 3; >=9: 2)"], 3)
         self.assertIn("INTEGRATED OPIOID RISK LEVEL: MODERATE", self.report())
@@ -653,13 +664,13 @@ class QuestionnaireCalculationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             calculate_comm([0.0] * 17, 99)
 
-    def test_standard_comm_cutoff_and_modified_interpretation(self):
+    def test_standard_comm_threshold_and_modified_interpretation(self):
         for value in range(69):
             self.assertTrue(severity_comm(value).startswith("Negative" if value < 9 else "Positive"))
         for maximum in (28, 64):
             scores = {**low_scores(), "comm_max": maximum, "comm": 23.0}
             self.assertEqual(validate_scores(scores), [])
-            self.assertIn("standard 17-item cutoff applied to modified form", severity_comm(23, maximum))
+            self.assertIn("standard 17-item threshold applied to modified form", severity_comm(23, maximum))
             self.assertEqual(risk_level(scores, "consistent", "stable", []), "Moderate")
             self.assertEqual(risk_contributions(scores, "consistent", "stable", [])[f"Modified COMM-{maximum // 4} (>=18: 3; >=9: 2)"], 3)
         scores = {**low_scores(), "comm_items": [0.0] * 17}
@@ -675,6 +686,55 @@ class QuestionnaireCalculationTests(unittest.TestCase):
         self.assertIn("COMM item(s) 15, 16 blank - needs review (total calculated by skipping blanks)", missing)
         self.assertEqual(risk_level(scores, "consistent", "stable", []), "Insufficient information")
         self.assertIn("PROVISIONAL", make_report(scores, [], "consistent", "stable")[0])
+
+
+class RiskThresholdTests(unittest.TestCase):
+    def test_default_preset_reproduces_original_template(self):
+        self.assertTrue(DEFAULT.is_default)
+        self.assertEqual(DEFAULT.get("COMM"), (9, 18))
+        self.assertEqual(DEFAULT.get("ORT"), (4, 8))
+        self.assertEqual(DEFAULT.get("PHQ-9"), (15, 20))
+        self.assertNotIn("PHQ-4", dict(DEFAULT.cutoffs))
+        self.assertEqual(DEFAULT.get("Overall"), (2, 5))
+        for comm, points in ((8, 0), (9, 2), (17, 2), (18, 3)):
+            scores = {**low_scores(), "comm": float(comm)}
+            self.assertEqual(
+                risk_contributions(scores, "consistent", "stable", [], DEFAULT),
+                risk_contributions(scores, "consistent", "stable", []),
+            )
+            self.assertEqual(risk_contributions(scores, "consistent", "stable", [])["COMM (>=18: 3; >=9: 2)"], points)
+
+    def test_presets_change_points_and_levels(self):
+        conservative = PRESETS["Conservative (flags more patients)"]
+        lenient = PRESETS["Lenient (flags fewer patients)"]
+        scores = {**low_scores(), "phq9": 12.0, "item9": 0.0, "ort": 3.0}
+        self.assertEqual(sum(risk_contributions(scores, "consistent", "stable", [], DEFAULT).values()), 0)
+        self.assertEqual(sum(risk_contributions(scores, "consistent", "stable", [], conservative).values()), 2)
+        self.assertEqual(risk_level(scores, "consistent", "stable", [], DEFAULT), "Low")
+        self.assertEqual(risk_level(scores, "consistent", "stable", [], conservative), "Moderate")
+        moderate = {**low_scores(), "comm": 9.0}
+        self.assertEqual(risk_level(moderate, "consistent", "stable", [], DEFAULT), "Moderate")
+        self.assertEqual(risk_level(moderate, "consistent", "stable", [], lenient), "Low")
+
+    def test_custom_thresholds_are_validated(self):
+        self.assertEqual(validate_cutoffs(dict(DEFAULT.cutoffs)), [])
+        bad = {**dict(DEFAULT.cutoffs), "COMM": (18, 9), "Overall": (0, 5)}
+        errors = validate_cutoffs(bad)
+        self.assertTrue(any("moderate threshold (18) must be lower" in error for error in errors))
+        self.assertTrue(any("between 1 and 19" in error for error in errors))
+        with self.assertRaises(ValueError):
+            make_thresholds("Custom", bad)
+        custom = make_thresholds("Custom", {**dict(DEFAULT.cutoffs), "Overall": (1, 3)})
+        self.assertFalse(custom.is_default)
+
+    def test_report_records_non_default_thresholds_only(self):
+        report, rows, *_ = make_report(low_scores(), [], "consistent", "stable")
+        self.assertNotIn("RISK THRESHOLDS", report)
+        self.assertNotIn("Risk Thresholds", [row[0] for row in rows])
+        lenient = PRESETS["Lenient (flags fewer patients)"]
+        report, rows, *_ = make_report(low_scores(), [], "consistent", "stable", thresholds=lenient)
+        self.assertIn("RISK THRESHOLDS: Lenient (flags fewer patients)", report)
+        self.assertIn(("Risk Thresholds", lenient.preset), [row[:2] for row in rows])
 
 
 if __name__ == "__main__":

@@ -8,4 +8,3 @@ venv/
 .streamlit/secrets.toml
 patient_forms/
 patient_results/
-generator

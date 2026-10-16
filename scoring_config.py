@@ -15,7 +15,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     instruments = config.get("instruments")
     if not isinstance(instruments, dict):
         raise ConfigError("scoring config: 'instruments' mapping is required.")
-    for name in ("PEG", "PDI", "PHQ-9", "ORT-OUD", "AUDIT", "COMM"):
+    for name in ("PEG", "PDI", "PHQ-9", "ORT-OUD", "COMM"):
         if name not in instruments:
             raise ConfigError(f"scoring config: missing instrument {name}.")
     for name, tool in instruments.items():

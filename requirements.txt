@@ -1,7 +1,8 @@
-streamlit
-pandas
-altair>=5.0
-pypdf>=6.0
-Pillow>=10.0
-opencv-python-headless>=4.10
-numpy>=1.24
+streamlit==1.37.1
+pandas==2.2.2
+altair==5.0.1
+pypdf==6.20.1
+Pillow==10.4.0
+opencv-python-headless==4.11.0.86
+numpy==1.26.4
+pyarrow==16.1.0

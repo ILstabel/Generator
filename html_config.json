@@ -44,17 +44,6 @@
         "overrides_total": false
       }
     },
-    "PHQ-4": {
-      "range": [0, 12],
-      "metric": "Pasted total; used only when PHQ-9 is absent",
-      "bands": [
-        {"min": 0, "max": 2, "label": "Minimal mood/anxiety symptoms"},
-        {"min_exclusive": 2, "max": 5, "label": "Mild mood/anxiety symptoms"},
-        {"min_exclusive": 5, "max": 8, "label": "Moderate mood/anxiety symptoms"},
-        {"min_exclusive": 8, "max": 12, "label": "Severe mood/anxiety symptoms"}
-      ],
-      "flag": {"min": 6, "label": "Elevated mood symptom burden (PHQ-4 >= 6)"}
-    },
     "ORT": {
       "range": [0, 26],
       "metric": "Pasted total; one scale for every ORT version (no ORT-OUD distinction). A level word on the 'ORT:' line overrides the computed level.",
@@ -67,7 +56,7 @@
     },
     "COMM": {
       "range": [0, 68],
-      "metric": "Pasted total; accepted as '/ 64', '/ 68' or '/ 28', and the >= 9 cutoff is applied to all of them",
+      "metric": "Pasted total; accepted as '/ 64', '/ 68' or '/ 28', and the >= 9 threshold is applied to all of them",
       "bands": [
         {"min": 0, "max_exclusive": 9, "label": "Below elevated misuse-risk threshold"},
         {"min": 9, "max": 68, "label": "Elevated opioid misuse-risk signal"}
@@ -76,12 +65,11 @@
     }
   },
   "integrated_risk": {
-    "description": "Sum of risk points; PHQ-4 points apply only when PHQ-9 is absent.",
+    "description": "Sum of risk points.",
     "points": {
       "COMM": [{"min": 18, "points": 3}, {"min": 9, "points": 2}],
       "ORT": [{"min": 8, "points": 3}, {"min": 4, "points": 1}],
       "PHQ-9": [{"min": 20, "points": 2}, {"min": 15, "points": 1}],
-      "PHQ-4": [{"min": 9, "points": 2}, {"min": 6, "points": 1}],
       "PHQ-9 item 9": [{"min_exclusive": 0, "points": 3}],
       "UDS/PDMP": {"discordant": 3, "requires_review": 2},
       "Refill behavior": {"early_or_escalation": 2, "lost_stolen": 2, "intermittent": 1, "requires_review": 1},

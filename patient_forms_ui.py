@@ -40,6 +40,8 @@ def short_score(text: str) -> str:
         return "Not scored"
     value = match.group(0) + ("*" if "PROVISIONAL" in text else "")
     rest = text[match.end():]
+    if "URGENT ACTION TRIGGER" in rest:
+        return value + " - URGENT: item 9 positive"
     if rest.startswith("; ") and not rest.startswith("; exact"):
         band = re.split(r"[.(]", rest[2:], maxsplit=1)[0].replace(" for Opioid Use Disorder", "").strip()
         if band:
@@ -280,6 +282,12 @@ def review_patient_forms(
         if st.session_state.get("forms_autofill_source") != marker:
             autofill(form, values)
             st.session_state["forms_autofill_source"] = marker
+    trend_code = patient_code(next(form for form in inspections if inspection_label(form) == selected_label).filename)
+    if trend_code:
+        from patient_trend import patient_trend_view
+
+        with st.expander(f"Patient trend: {trend_code} (saved visits)", expanded=individual):
+            patient_trend_view(trend_code, key="forms_trend")
     if not manual:
         keep_review_state()
         for form in inspections:
